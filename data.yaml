@@ -1,0 +1,6 @@
+train: "/home/zafar/old_pc/data_sets/membrane_crack.v2i.yolov11/train.txt"
+val  : "/home/zafar/old_pc/data_sets/membrane_crack.v2i.yolov11/test.txt"
+test : "/home/zafar/old_pc/data_sets/membrane_crack.v2i.yolov11/test.txt"
+
+nc   : 1
+names: ["defect"]
