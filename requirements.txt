@@ -1,0 +1,17 @@
+matplotlib
+natsort
+numpy
+opencv-python
+packaging
+pandas
+pillow
+PyYAML
+scipy
+seaborn
+torch
+torchvision
+tqdm
+typing_extensions
+ultralytics
+ultralytics-thop
+urllib3
