@@ -1,6 +1,8 @@
 import cv2, os, argparse, tqdm, glob
 import numpy as np
 from natsort import natsorted
+from ultralytics import YOLO
+import torch
 
 
 def parseArgs():
@@ -15,6 +17,12 @@ def parseArgs():
                         help='to choose prediction and visulization mode')
     parser.add_argument('--visualize', action='store_true',
                         help='To choose visualize only mode')
+    parser.add_argument('--output', type=str, default='output',
+                        help='Specify a directory to save outputs')
+    parser.add_argument('--save', action='store_true',
+                        help='Choose save if you want to save the visualization results')
+    parser.add_argument('--device', type=int, default=0,
+                        help='Choose a gpu device')
     args = parser.parse_args()
     return args
 
@@ -39,8 +47,8 @@ def drawBox(img, boxes, boxType='xywh', color=(0,255,0), thickness=1):
     return img    
 
 def vis(img, preds=None):
-    if preds:
-        pass    # TODO: impliment for prediction visualization
+    if preds is not None:
+        _img  = drawBox(img, preds, color=(0, 0, 255))
     else:
         _img = cv2.imread(img)
         labelPath = img.split('.jpg')[0] + '.txt'
@@ -54,20 +62,51 @@ def vis(img, preds=None):
 
         boxes = np.array(boxes)        
         _img  = drawBox(_img, boxes)
-        cv2.imshow('',_img)
-        cv2.waitKey()
-        cv2.destroyAllWindows() 
+
+    cv2.imshow('',_img)
+    cv2.waitKey()
+    cv2.destroyAllWindows()
+    return _img 
 
 def main():
     args = parseArgs()
     imgs = glob.glob(f'{args.dataPath}/*.jpg')
     imgs = natsorted(imgs)
 
+    if args.save:
+        if not os.path.isdir(args.output):
+            os.makedirs(args.output)
+
+    if args.Predict:
+        device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
+        model  = YOLO(args.model)
+        # model.to(device)
+
     for img in tqdm.tqdm(imgs):
+        if args.save:
+            name     = img.split('/')[-1]
+            saveName = os.path.join(args.output, name)
+            # print()
         if args.Predict:
-            print(NotImplemented)
+            _img    = cv2.imread(img)
+            if _img.shape[1]>1080:
+                _img = cv2.resize(_img, (1920, 1080), cv2.INTER_AREA)
+            results = model.predict(_img, args.conf, verbose=False)
+            for result in results:
+                boxes = result.boxes.xywh.cpu().numpy()
+                clsz  = result.boxes.cls.cpu().numpy()
+                conf  = result.boxes.conf.cpu().numpy()  
+            preds = np.zeros((boxes.shape[0], 6))
+            preds[:,0]   = clsz
+            preds[:,-1]  = conf
+            preds[:,1:5] = boxes
+            annotImg = vis(_img, preds)
+            
         elif args.visualize:
-            vis(img)    
+            annotImg = vis(img)
+
+        if args.save:
+            cv2.imwrite(saveName, annotImg)        
 
 if __name__=='__main__':
     main()
