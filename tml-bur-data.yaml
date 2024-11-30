@@ -1,0 +1,6 @@
+train: "/home/zafar/old_pc/data_sets/TML-Bur-detection.v1i.yolov8-obb/train.txt"
+val  : "/home/zafar/old_pc/data_sets/TML-Bur-detection.v1i.yolov8-obb/test.txt"
+test : "/home/zafar/old_pc/data_sets/TML-Bur-detection.v1i.yolov8-obb/test.txt"
+
+nc   : 1
+names: ["defect"]
