@@ -1,6 +1,10 @@
 # membrane_crack_Anom
 Repository to perform membrane crack anomaly detection with yolov11 detector
 
+![image](https://drive.google.com/uc?export=view&id=15kIoqy7NJhZaVYKJdHdtkx5ToTWqi5uQ)
+
+# How to use
+
 create a conda environment and install requirements:
 
 ```conda create --name anom python=3.10```
