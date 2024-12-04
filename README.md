@@ -1,5 +1,9 @@
-# membrane_crack_Anom
-Repository to perform membrane crack anomaly detection with yolov11 detector
+# Terminal Bur Anomalt detection
+Repository to perform terminal bur detection
+
+![image](https://drive.google.com/uc?export=view&id=1BQgngjqZbu1CQJyHHia2IBkUCAcFnCA7)
+
+# How to use
 
 create a conda environment and install requirements:
 
