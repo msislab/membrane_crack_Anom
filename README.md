@@ -14,3 +14,5 @@ create a conda environment and install requirements:
 Alternatively, use the command below to pull the docker image and start a container with it:
 
 ```docker pull zafar343/yolonew:latest```
+
+**Updates pending...**
