@@ -22,12 +22,13 @@ def train_yolov8():
         lr0         = args.initial_lr ,                  
         project     = args.project    ,       
         device      = device          ,
-        save_period = args.save_period        
+        save_period = args.save_period,
+        patience    = 1000        
     )
 
 def parseArgs():
     parser = argparse.ArgumentParser(description='yolo training')
-    parser.add_argument("--model"      , type=str, default='yolov11n.pt',
+    parser.add_argument("--model"      , type=str, default='yolo11n.pt',
                         help='provide a model path (model.pt) if initializing from a pretrained checkpoint'  )
     parser.add_argument("--config"     , type=str, default=None,
                         help='provide a model config filename (.yaml) if training from scratch'              )
