@@ -17,7 +17,8 @@ def validate():
         project = args.project    ,       
         device  = device          ,
         save_txt= args.save_txt   ,
-        conf    = args.conf       
+        conf    = args.conf       ,
+        verbose = True       
     )
 
 def parseArgs():

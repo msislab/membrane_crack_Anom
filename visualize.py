@@ -3,6 +3,11 @@ import numpy as np
 from natsort import natsorted
 from ultralytics import YOLO
 import torch
+from shapely.geometry import Polygon
+import time
+import colorama
+from colorama import Style, Fore, Back
+colorama.init(autoreset=True)
 
 
 def parseArgs():
@@ -13,10 +18,14 @@ def parseArgs():
                         help='Provide model.pt path')
     parser.add_argument('--conf', type=float, default=0.5,
                         help='Choose a confidence threshold between 0 and 1')
+    parser.add_argument('--iou_thres', type=float, default=0.30,
+                        help='Choose an iou threshold between 0 and 1')
     parser.add_argument('--PredictYolo', action='store_true',
                         help='to choose prediction and visulization mode')
     parser.add_argument('--PredYolo_obb', action='store_true',
                         help='to choose prediction and visulization mode')
+    parser.add_argument('--multiLevel', action='store_true',
+                        help='to enable multi-view prediction')
     parser.add_argument('--visualizeGT', action='store_true',
                         help='To choose visualize only mode')
     parser.add_argument('--obbGT', action='store_true',
@@ -32,9 +41,74 @@ def parseArgs():
     args = parser.parse_args()
     return args
 
+def calculate_iou(box1, box2):
+    poly1 = Polygon(box1.reshape(4, 2))
+    poly2 = Polygon(box2.reshape(4, 2))
+
+    # if not poly1.is_valid or not poly2.is_valid:
+    #     return 0.0
+
+    intersection_area = poly1.intersection(poly2).area
+    union_area = poly1.union(poly2).area
+
+    return intersection_area / union_area if union_area > 0 else 0.0
+
+def find_overlaps(gt_boxes, pred_boxes, iou_threshold=0.5, stats=False):
+    overlaps  = np.zeros((gt_boxes.shape[0], pred_boxes.shape[0]))
+
+    for gt_idx, gt_box in enumerate(gt_boxes):
+        gt_class, gt_coords = gt_box[0], gt_box[1:]
+        for pred_idx, pred_box in enumerate(pred_boxes):
+            pred_class, pred_coords = pred_box[0], pred_box[1:9]
+
+            # in case of more than 1 classes
+            # if gt_class != pred_class:
+            #     continue
+
+            iou = calculate_iou(gt_coords, pred_coords)
+            # if iou >= iou_threshold:
+            #     overlaps.append((gt_idx, pred_idx, iou))
+            overlaps[gt_idx, pred_idx] = iou   
+    
+    if stats:
+        # Get indices of the maximum value in each row
+        max_indices = np.argmax(overlaps, axis=1)
+        # Create an output array of zeros with the same shape
+        _overlaps = np.zeros_like(overlaps)
+        # Set the maximum values in the corresponding positions
+        _overlaps[np.arange(overlaps.shape[0]), max_indices] = overlaps[np.arange(overlaps.shape[0]), max_indices]
+        return _overlaps
+    else:
+        return overlaps
+
+def stats_obb(_Path, preds, iou_thres):
+    img = cv2.imread(_Path)
+    h,w,_ = img.shape
+    labelPath = _Path.split('.jpg')[0] + '.txt'
+    boxes = []
+    with open(labelPath, 'r') as f:
+        for line in f.readlines():
+            boxStr = line.split()
+            box = [int(boxStr[0]),float(boxStr[1])*w, float(boxStr[2])*h, 
+                    float(boxStr[3])*w, float(boxStr[4])*h,
+                    float(boxStr[5])*w, float(boxStr[6])*h,
+                    float(boxStr[7])*w, float(boxStr[8])*h]
+            boxes.append(np.array(box))
+    boxes  = np.array(boxes)
+    overlaps_ = find_overlaps(boxes, preds, stats=True)
+    Fn_GT     = np.where(np.all(overlaps_ == 0, axis=1))[0]
+    Fp_preds  = np.where(np.all(overlaps_ < iou_thres, axis=0))[0]
+
+    total_Gt    = boxes.shape[0]
+    total_preds = preds.shape[0]
+    tp = len(overlaps_[overlaps_>iou_thres])
+    fp = total_preds-tp
+    # print()
+    return total_Gt, total_preds, tp, fp
+
 def drawBox(img, boxes, obb=False, boxType='xywh', color=(0,255,0), thickness=1):
     if obb:
-        print('visualizing obb preds')
+        # print('visualizing obb preds')
         for box in boxes:
             _box = np.array([[int(box[1]), int(box[2])],
                              [int(box[3]), int(box[4])],
@@ -80,7 +154,7 @@ def drawBox(img, boxes, obb=False, boxType='xywh', color=(0,255,0), thickness=1)
                 cv2.putText(img, text, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), thickness+1)      
     return img    
 
-def visPreds(GTpath=None, img=None, preds=None, obb=False, boxType='xywh'):
+def visPreds(GTpath=None, img=None, preds=None, obb=False, boxType='xywh', color=(0,0,255)):
     if GTpath:  # to visualize GT boxes for comparison
         labelPath = GTpath.split('.jpg')[0] + '.txt'
         if obb: # to visualize obb (oriented box with 4 points) preds
@@ -107,13 +181,13 @@ def visPreds(GTpath=None, img=None, preds=None, obb=False, boxType='xywh'):
             _img  = drawBox(img, boxes, boxType=boxType)
     else:       # to visualize pred boxes
         if obb:
-            _img  = drawBox(img, preds, obb=obb, color=(0, 0, 255), thickness=2)
+            _img  = drawBox(img, preds, obb=obb, color=color, thickness=2)
         else:
-            _img  = drawBox(img, preds, boxType=boxType, color=(0, 0, 255))
+            _img  = drawBox(img, preds, boxType=boxType, color=color)
     
-    cv2.imshow('',_img)
-    cv2.waitKey()
-    cv2.destroyAllWindows()
+    # cv2.imshow('',_img)
+    # cv2.waitKey()
+    # cv2.destroyAllWindows()
 
     return _img            
 
@@ -172,26 +246,48 @@ def predyolo(img, args, model):
         annotImg = visPreds(GTpath=args.path, img=annotImg)
     return annotImg        
 
-def predYOLO_obb(img, args, model):
-    if img.shape[0]>1080:
-        _img = cv2.resize(img, (1920, 1080), cv2.INTER_AREA)
-    else: _img=img    
-    results = model(_img, conf=args.conf, verbose=True)
-    for result in results:
-        boxes  = result.obb.xyxyxyxy.cpu().numpy()
-        _boxes = boxes.reshape(boxes.shape[0], -1)
+def processOBB(yoloOBB_rslt, conf_thres):
+    preds = np.zeros((1,10))
+    for result in yoloOBB_rslt:
+        boxes  = result.obb.xyxyxyxy.cpu().numpy().reshape(-1,8)
         clsz   = result.obb.cls.cpu().numpy()
         conf   = result.obb.conf.cpu().numpy()
-    preds = np.zeros((boxes.shape[0], 10))
-    preds[:,0]   = clsz
-    preds[:,-1]  = conf
-    preds[:,1:9] = _boxes
-    annotImg = visPreds(img=_img, preds=preds, obb=True)
-    if args.visGT:
-        annotImg = visPreds(GTpath=args.path, img=annotImg, obb=True)
+        _preds = np.hstack([clsz[:,None], boxes, conf[:,None]])
+        preds  = np.vstack((preds, _preds))
+
+    # preds = np.delete(preds, 0, axis=0)
+    return preds[preds[:, -1] > conf_thres]
+
+def consolidate(pred1, pred2):
+    _pred1 = np.delete(pred1, -1, axis=1)
+    _pred2 = np.delete(pred2, -1, axis=1)
+    overlaps   = find_overlaps(_pred1, _pred2)
+    overlapped = np.where(overlaps>0.45)
+    # Select rows based on overlap condition
+    pred1_overlap = pred1[overlapped[0]]
+    pred2_overlap = pred2[overlapped[1]]
+    # Take predictions with higher confidence
+    max_conf_mask = pred1_overlap[:, -1] > pred2_overlap[:, -1]
+    preds = np.where(max_conf_mask[:, None], pred1_overlap, pred2_overlap)
     
-    # impliment the analysis here
-    return annotImg            
+    _pred1 = np.delete(pred1, overlapped[0], axis=0)
+    _pred2 = np.delete(pred2, overlapped[1], axis=0)
+    preds  = np.vstack((preds, _pred1, _pred2))
+    return preds
+
+def predYOLO_obb(img, args, model):  
+    if args.multiLevel:
+        results_1 = model.predict(img, imgsz=640, conf=0.001, verbose=False)
+        results_2 = model.predict(img, imgsz=896, conf=0.001, verbose=False)
+        preds_1   = processOBB(results_1, args.conf)
+        preds_2   = processOBB(results_2, args.conf)
+        preds     = consolidate(preds_1, preds_2)
+        preds     = preds[preds[:,-1]>0.1]
+    else:
+        results = model.predict(img, imgsz=640, conf=0.001, verbose=False)
+        preds   = processOBB(results, args.conf)
+
+    return preds            
 
 def main():
     args = parseArgs()
@@ -199,8 +295,9 @@ def main():
     imgs = natsorted(imgs)
 
     if args.save:
-        if not os.path.isdir(args.output):
-            os.makedirs(args.output)
+        save_dir = f'{args.output}/imgsz=1280'
+        if not os.path.isdir(save_dir):
+            os.makedirs(save_dir)
 
     if args.PredictYolo or args.PredYolo_obb:
         args.visGT = True
@@ -208,22 +305,45 @@ def main():
         model  = YOLO(args.model)
         # model.to(device)
 
+    if args.PredYolo_obb:
+        TP = 0
+        FP = 0
+        Total_GT   = 0
+        Total_Pred = 0
+    
+    total_time = 0
+
     for imgPath in tqdm.tqdm(imgs):
         args.path = imgPath
         if args.save:
             name      = imgPath.split('/')[-1]
-            saveName  = os.path.join(args.output, name)
+            saveName  = os.path.join(save_dir, name)
 
         _img    = cv2.imread(imgPath)
 
-        cv2.imshow('', _img)
-        cv2.waitKey()
-        cv2.destroyAllWindows()
+        # cv2.imshow('', _img)
+        # cv2.waitKey()
+        # cv2.destroyAllWindows()
 
         if args.PredictYolo:   
             annotImg = predyolo(img=_img, args=args, model=model)
         elif args.PredYolo_obb:
-            annotImg = predYOLO_obb(img=_img, args=args, model=model)                    
+            s = time.time()
+            preds = predYOLO_obb(img=_img, args=args, model=model)
+            e = time.time()
+            total_time+=e-s
+            # annotate image with preds
+            annotImg = visPreds(img=_img, preds=preds, obb=True)
+            # annotate with GT
+            if args.visGT:
+                annotImg = visPreds(GTpath=args.path, img=annotImg, obb=True)
+        
+            # prediction statistics (validation)
+            total_Gt, total_preds, tp, fp = stats_obb(args.path, preds, args.iou_thres)
+            TP += tp
+            FP += fp
+            Total_GT   += total_Gt
+            Total_Pred += total_preds                    
         elif args.visualizeGT:
             if args.obbGT:
                 annotImg = visGT(imgPath, obb=args.obbGT)
@@ -231,7 +351,19 @@ def main():
                 annotImg = visGT(imgPath, boxType=args.boxType)
 
         if args.save:
-            cv2.imwrite(saveName, annotImg)         
+            cv2.imwrite(saveName, annotImg)
+
+    print('Total inference time is: ', total_time/len(imgs))
+    FN        = Total_GT-TP
+    precision = round((TP/(TP+FP))*100, 4)
+    recal     = round((TP/(TP+FN))*100,4)
+    acc       = round((TP/(Total_GT))*100, 4)
+
+    s = ('%20s' + '%13s' * 6) % ('Anomaly', 'Total-GT', 'Total-Preds', 'TP', 'FP', 'P', 'R')
+    print(f'{Style.BRIGHT}{s}')
+    results = ('%20s' + '%13s' * 6) % ('TML BUR', Total_GT, Total_Pred, TP, FP, precision, recal)
+    print(results)
+    print()             
 
 if __name__=='__main__':
     main()
