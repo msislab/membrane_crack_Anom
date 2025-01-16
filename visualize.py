@@ -205,7 +205,11 @@ def visGT(path=None, obb=False, boxType='xywh'):
                             float(boxStr[7])*_img.shape[1], float(boxStr[8])*_img.shape[0]]
                 boxes.append(np.array(box))
         boxes = np.array(boxes)        
-        _img  = drawBox(_img, boxes, obb=obb, thickness=2)
+        _img  = drawBox(_img, boxes, obb=obb, thickness=1)
+
+        # cv2.imshow('',_img)
+        # cv2.waitKey()
+        # cv2.destroyAllWindows()
     else:
         with open(labelPath, 'r') as f:
             for line in f.readlines():
@@ -216,9 +220,9 @@ def visGT(path=None, obb=False, boxType='xywh'):
         boxes = np.array(boxes)        
         _img  = drawBox(_img, boxes)
 
-    cv2.imshow('',_img)
-    cv2.waitKey()
-    cv2.destroyAllWindows()
+    # cv2.imshow('',_img)
+    # cv2.waitKey()
+    # cv2.destroyAllWindows()
 
     return _img 
 
@@ -275,27 +279,29 @@ def consolidate(pred1, pred2):
     preds  = np.vstack((preds, _pred1, _pred2))
     return preds
 
-def predYOLO_obb(img, args, model):  
+def predYOLO_obb(img, args, model, device='cpu'):  
     if args.multiLevel:
-        results_1 = model.predict(img, imgsz=640, conf=0.001, verbose=False)
-        results_2 = model.predict(img, imgsz=896, conf=0.001, verbose=False)
+        results_1 = model.predict(img, imgsz=(1024,1024), conf=args.conf, device=device, verbose=False)
+        results_2 = model.predict(img, imgsz=(640,640), conf=args.conf, device=device, verbose=False)
         preds_1   = processOBB(results_1, args.conf)
         preds_2   = processOBB(results_2, args.conf)
         preds     = consolidate(preds_1, preds_2)
-        preds     = preds[preds[:,-1]>0.1]
+        preds     = preds[preds[:,-1]>0.03]
     else:
-        results = model.predict(img, imgsz=640, conf=0.001, verbose=False)
+        results = model.predict(img, conf=args.conf, device=device, verbose=True)
         preds   = processOBB(results, args.conf)
+        preds   = preds[preds[:,-1]>0.015]
 
     return preds            
 
 def main():
-    args = parseArgs()
-    imgs = glob.glob(f'{args.dataPath}/*.jpg')
-    imgs = natsorted(imgs)
+    args  = parseArgs()
+    imgs  = glob.glob(f'{args.dataPath}/*.jpg')
+    imgs  = natsorted(imgs)
+    stats = False
 
     if args.save:
-        save_dir = f'{args.output}/imgsz=1280'
+        save_dir = f'{args.output}/pin-roi-01-16'
         if not os.path.isdir(save_dir):
             os.makedirs(save_dir)
 
@@ -329,7 +335,7 @@ def main():
             annotImg = predyolo(img=_img, args=args, model=model)
         elif args.PredYolo_obb:
             s = time.time()
-            preds = predYOLO_obb(img=_img, args=args, model=model)
+            preds = predYOLO_obb(img=_img, args=args, model=model, device=device)
             e = time.time()
             total_time+=e-s
             # annotate image with preds
@@ -339,6 +345,7 @@ def main():
                 annotImg = visPreds(GTpath=args.path, img=annotImg, obb=True)
         
             # prediction statistics (validation)
+            stats = True
             total_Gt, total_preds, tp, fp = stats_obb(args.path, preds, args.iou_thres)
             TP += tp
             FP += fp
@@ -347,22 +354,29 @@ def main():
         elif args.visualizeGT:
             if args.obbGT:
                 annotImg = visGT(imgPath, obb=args.obbGT)
+                # cv2.imshow('',annotImg)
+                # cv2.waitKey()
+                # cv2.destroyAllWindows()
             else:
                 annotImg = visGT(imgPath, boxType=args.boxType)
+                cv2.imshow('',annotImg)
+                cv2.waitKey()
+                cv2.destroyAllWindows()
 
         if args.save:
             cv2.imwrite(saveName, annotImg)
 
-    print('Total inference time is: ', total_time/len(imgs))
-    FN        = Total_GT-TP
-    precision = round((TP/(TP+FP))*100, 4)
-    recal     = round((TP/(TP+FN))*100,4)
-    acc       = round((TP/(Total_GT))*100, 4)
+    if stats:
+        print('Total inference time is: ', total_time/len(imgs))
+        FN        = Total_GT-TP
+        precision = round((TP/(TP+FP))*100, 4)
+        recal     = round((TP/(TP+FN))*100,4)
+        acc       = round((TP/(Total_GT))*100, 4)
 
-    s = ('%20s' + '%13s' * 6) % ('Anomaly', 'Total-GT', 'Total-Preds', 'TP', 'FP', 'P', 'R')
-    print(f'{Style.BRIGHT}{s}')
-    results = ('%20s' + '%13s' * 6) % ('TML BUR', Total_GT, Total_Pred, TP, FP, precision, recal)
-    print(results)
+        s = ('%20s' + '%13s' * 6) % ('Anomaly', 'Total-GT', 'Total-Preds', 'TP', 'FP', 'P', 'R')
+        print(f'{Style.BRIGHT}{s}')
+        results = ('%20s' + '%13s' * 6) % ('TML BUR', Total_GT, Total_Pred, TP, FP, precision, recal)
+        print(results)
     print()             
 
 if __name__=='__main__':

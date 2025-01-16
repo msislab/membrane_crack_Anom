@@ -1,6 +1,6 @@
-train: "/home/zafar/old_pc/data_sets/robot-project-datasets/TML-pin-roi-data/roiDataset.v1i.yolov11/train.txt"
-val  : "/home/zafar/old_pc/data_sets/robot-project-datasets/TML-pin-roi-data/roiDataset.v1i.yolov11/test.txt"
-test : "/home/zafar/old_pc/data_sets/robot-project-datasets/TML-pin-roi-data/roiDataset.v1i.yolov11/test.txt"
+train: "/home/zafar/old_pc/data_sets/robot-project-datasets/ROI_datasets/train.txt"
+val  : "/home/zafar/old_pc/data_sets/robot-project-datasets/ROI_datasets/val.txt"
+test : "/home/zafar/old_pc/data_sets/robot-project-datasets/ROI_datasets/val.txt"
 
 nc   : 1
-names: ["pins"]
+names: ["pin"]

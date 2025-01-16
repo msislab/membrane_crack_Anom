@@ -1,6 +1,6 @@
-train: "/home/zafar/old_pc/data_sets/robot-project-datasets/TML-Bur-detection.v3i.yolov8-obb/train.txt"
-val  : "/home/zafar/old_pc/data_sets/robot-project-datasets/TML-Bur-detection.v3i.yolov8-obb/test.txt"
-test : "/home/zafar/old_pc/data_sets/robot-project-datasets/TML-Bur-detection.v3i.yolov8-obb/test.txt"
+train: "/home/zafar/old_pc/data_sets/robot-project-datasets/TML-Bur-detection_v1/train.txt"
+val  : "/home/zafar/old_pc/data_sets/robot-project-datasets/TML-Bur-detection_v1/val.txt"
+test : "/home/zafar/old_pc/data_sets/robot-project-datasets/TML-Bur-detection_v1/val.txt"
 
 nc   : 1
 names: ["defect"]

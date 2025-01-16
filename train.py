@@ -6,6 +6,7 @@ def train_yolov8():
     args   = parseArgs()
     # choose between training from scratch and training using a checkpoint
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
+    # device = "cpu"
     if args.config:
         model_type = args.config
     else:
@@ -23,6 +24,8 @@ def train_yolov8():
         project     = args.project    ,       
         device      = device          ,
         save_period = args.save_period,
+        scale       = args.scale      ,
+        amp         = args.amp        ,
         patience    = 1000        
     )
 
@@ -36,6 +39,8 @@ def parseArgs():
     parser.add_argument("--epochs"     , type=int, default=100, help='specify the number of epochs'          )
     parser.add_argument("--batch_size" , type=int, default=32, help='specify the batch size'                 )
     parser.add_argument("--img_size"   , type=int, default=640, help='specify the image size'                )
+    parser.add_argument("--scale"      , type=float, default=0.5, help='specify the image size'              )
+    parser.add_argument("--amp"        , action='store_true', help='Choose mixed precision training'         ) 
     parser.add_argument("--project"    , type=str, default='runs/membrane_crack', help='name your project'   )
     parser.add_argument("--name"       , type=str, default=''                                                )
     parser.add_argument("--device"     , type=int, default=0, help='Chosse a gpu device'                     )
