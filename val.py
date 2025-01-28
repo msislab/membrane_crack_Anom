@@ -27,12 +27,12 @@ def parseArgs():
                         help='provide a model path (model.pt) if initializing from a pretrained checkpoint')
     parser.add_argument("--data"       , type=str, default='data.yaml', help='provide data.yaml path'      )
     parser.add_argument("--batch_size" , type=int, default=16, help='specify the batch size'               )
-    parser.add_argument("--img_size"   , type=int, default=640, help='specify the image size'              )
+    parser.add_argument("--img_size"   , type=int, default=832, help='specify the image size'              )
     parser.add_argument("--project"    , type=str, default='runs/Yolov8_Tutorial', help='name your project')
     parser.add_argument("--name"       , type=str, default='custom_training'                               )
     parser.add_argument("--device"     , type=int, default=0, help='Chosse a gpu device'                   )
     parser.add_argument("--save_txt"   , action='store_true'                                               )
-    parser.add_argument("--conf"       , type=float, default=0.25                                          )
+    parser.add_argument("--conf"       , type=float, default=0.1                                          )
 
     args = parser.parse_args()
     return args

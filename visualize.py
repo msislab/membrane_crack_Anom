@@ -38,6 +38,8 @@ def parseArgs():
                         help='Choose a gpu device')
     parser.add_argument('--boxType', type=str, default='xywh',
                         help='Choose box type for annotation')
+    parser.add_argument('--imgSize', type=int, default=640,
+                        help='Choose box type for annotation')
     args = parser.parse_args()
     return args
 
@@ -56,28 +58,40 @@ def calculate_iou(box1, box2):
 def find_overlaps(gt_boxes, pred_boxes, iou_threshold=0.5, stats=False):
     overlaps  = np.zeros((gt_boxes.shape[0], pred_boxes.shape[0]))
 
-    for gt_idx, gt_box in enumerate(gt_boxes):
-        gt_class, gt_coords = gt_box[0], gt_box[1:]
-        for pred_idx, pred_box in enumerate(pred_boxes):
-            pred_class, pred_coords = pred_box[0], pred_box[1:9]
+    matched = set()  # Tracks matched ground truth indices
+    tp, fp = 0, 0
+
+    for pred_idx, pred_box in enumerate(pred_boxes):
+        best_iou = 0
+        best_idx = -1
+        pred_class, pred_coords = pred_box[0], pred_box[1:9]
+        for gt_idx, gt_box in enumerate(gt_boxes):
+            gt_class, gt_coords = gt_box[0], gt_box[1:]
 
             # in case of more than 1 classes
             # if gt_class != pred_class:
             #     continue
-
-            iou = calculate_iou(gt_coords, pred_coords)
-            # if iou >= iou_threshold:
-            #     overlaps.append((gt_idx, pred_idx, iou))
-            overlaps[gt_idx, pred_idx] = iou   
+            if gt_idx not in matched:
+                iou = calculate_iou(gt_coords, pred_coords)
+                if iou > best_iou:
+                    overlaps[gt_idx, pred_idx] = iou
+                    best_iou = iou
+                    best_idx = gt_idx
+        if best_iou >= iou_threshold:
+            tp += 1
+            matched.add(best_idx)
+        else:
+            fp += 1  
     
     if stats:
         # Get indices of the maximum value in each row
-        max_indices = np.argmax(overlaps, axis=1)
+        # max_indices = np.argmax(overlaps, axis=1)
         # Create an output array of zeros with the same shape
-        _overlaps = np.zeros_like(overlaps)
+        # _overlaps = np.zeros_like(overlaps)
         # Set the maximum values in the corresponding positions
-        _overlaps[np.arange(overlaps.shape[0]), max_indices] = overlaps[np.arange(overlaps.shape[0]), max_indices]
-        return _overlaps
+        # _overlaps[np.arange(overlaps.shape[0]), max_indices] = overlaps[np.arange(overlaps.shape[0]), max_indices]
+        # return _overlaps
+        return tp, fp
     else:
         return overlaps
 
@@ -95,15 +109,16 @@ def stats_obb(_Path, preds, iou_thres):
                     float(boxStr[7])*w, float(boxStr[8])*h]
             boxes.append(np.array(box))
     boxes  = np.array(boxes)
-    overlaps_ = find_overlaps(boxes, preds, stats=True)
-    Fn_GT     = np.where(np.all(overlaps_ == 0, axis=1))[0]
-    Fp_preds  = np.where(np.all(overlaps_ < iou_thres, axis=0))[0]
+    tp, fp = find_overlaps(boxes, preds, stats=True)
+    # Fn_GT     = np.where(np.all(overlaps_ == 0, axis=1))[0]
+    # Fp_preds  = np.where(np.all(overlaps_ < iou_thres, axis=0))[0]
 
     total_Gt    = boxes.shape[0]
     total_preds = preds.shape[0]
-    tp = len(overlaps_[overlaps_>iou_thres])
-    fp = total_preds-tp
-    # print()
+    # tp = len(overlaps_[overlaps_>=iou_thres])
+    # fp = total_preds-tp
+    # print(total_preds, '\n', tp, '\n', fp)
+    # time.sleep(2)
     return total_Gt, total_preds, tp, fp
 
 def drawBox(img, boxes, obb=False, boxType='xywh', color=(0,255,0), thickness=1):
@@ -194,35 +209,36 @@ def visPreds(GTpath=None, img=None, preds=None, obb=False, boxType='xywh', color
 def visGT(path=None, obb=False, boxType='xywh'):
     _img = cv2.imread(path)
     labelPath = path.split('.jpg')[0] + '.txt'
-    boxes = []
-    if obb:
-        with open(labelPath, 'r') as f:
-            for line in f.readlines():
-                boxStr = line.split()
-                box = [int(boxStr[0]),float(boxStr[1])*_img.shape[1], float(boxStr[2])*_img.shape[0], 
-                            float(boxStr[3])*_img.shape[1], float(boxStr[4])*_img.shape[0],
-                            float(boxStr[5])*_img.shape[1], float(boxStr[6])*_img.shape[0],
-                            float(boxStr[7])*_img.shape[1], float(boxStr[8])*_img.shape[0]]
-                boxes.append(np.array(box))
-        boxes = np.array(boxes)        
-        _img  = drawBox(_img, boxes, obb=obb, thickness=1)
+    if os.path.isfile(labelPath):
+        boxes = []
+        if obb:
+            with open(labelPath, 'r') as f:
+                for line in f.readlines():
+                    boxStr = line.split()
+                    box = [int(boxStr[0]),float(boxStr[1])*_img.shape[1], float(boxStr[2])*_img.shape[0], 
+                                float(boxStr[3])*_img.shape[1], float(boxStr[4])*_img.shape[0],
+                                float(boxStr[5])*_img.shape[1], float(boxStr[6])*_img.shape[0],
+                                float(boxStr[7])*_img.shape[1], float(boxStr[8])*_img.shape[0]]
+                    boxes.append(np.array(box))
+            boxes = np.array(boxes)        
+            _img  = drawBox(_img, boxes, obb=obb, thickness=1)
+
+            # cv2.imshow('',_img)
+            # cv2.waitKey()
+            # cv2.destroyAllWindows()
+        else:
+            with open(labelPath, 'r') as f:
+                for line in f.readlines():
+                    boxStr = line.split()
+                    box = [int(boxStr[0]),float(boxStr[1])*_img.shape[1], float(boxStr[2])*_img.shape[0], 
+                            float(boxStr[3])*_img.shape[1], float(boxStr[4])*_img.shape[0]]
+                    boxes.append(np.array(box))
+            boxes = np.array(boxes)        
+            _img  = drawBox(_img, boxes)
 
         # cv2.imshow('',_img)
         # cv2.waitKey()
         # cv2.destroyAllWindows()
-    else:
-        with open(labelPath, 'r') as f:
-            for line in f.readlines():
-                boxStr = line.split()
-                box = [int(boxStr[0]),float(boxStr[1])*_img.shape[1], float(boxStr[2])*_img.shape[0], 
-                        float(boxStr[3])*_img.shape[1], float(boxStr[4])*_img.shape[0]]
-                boxes.append(np.array(box))
-        boxes = np.array(boxes)        
-        _img  = drawBox(_img, boxes)
-
-    # cv2.imshow('',_img)
-    # cv2.waitKey()
-    # cv2.destroyAllWindows()
 
     return _img 
 
@@ -232,7 +248,7 @@ def predyolo(img, args, model):
         _img = cv2.resize(img, (1920, 1080), cv2.INTER_AREA)
     else: _img=img
     # get model results
-    results = model(_img, conf=args.conf, verbose=True)
+    results = model(_img, conf=args.conf, verbose=False)
     # extract yolo preds
     for result in results:
         boxes = result.boxes.xywh.cpu().numpy()
@@ -260,7 +276,7 @@ def processOBB(yoloOBB_rslt, conf_thres):
         preds  = np.vstack((preds, _preds))
 
     # preds = np.delete(preds, 0, axis=0)
-    return preds[preds[:, -1] > conf_thres]
+    return preds[preds[:, -1] >= conf_thres]
 
 def consolidate(pred1, pred2):
     _pred1 = np.delete(pred1, -1, axis=1)
@@ -288,9 +304,9 @@ def predYOLO_obb(img, args, model, device='cpu'):
         preds     = consolidate(preds_1, preds_2)
         preds     = preds[preds[:,-1]>0.03]
     else:
-        results = model.predict(img, conf=args.conf, device=device, verbose=True)
+        results = model.predict(img, imgsz=args.imgSize, conf=args.conf, device=device, verbose=True)
         preds   = processOBB(results, args.conf)
-        preds   = preds[preds[:,-1]>0.015]
+        # preds   = preds[preds[:,-1]>0.015]
 
     return preds            
 
@@ -301,7 +317,7 @@ def main():
     stats = False
 
     if args.save:
-        save_dir = f'{args.output}/pin-roi-01-16'
+        save_dir = f'{args.output}/bur-model-val'
         if not os.path.isdir(save_dir):
             os.makedirs(save_dir)
 
@@ -321,6 +337,7 @@ def main():
 
     for imgPath in tqdm.tqdm(imgs):
         args.path = imgPath
+        print(imgPath)
         if args.save:
             name      = imgPath.split('/')[-1]
             saveName  = os.path.join(save_dir, name)
