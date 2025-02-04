@@ -97,7 +97,7 @@ def main(json_file, mask_output_folder, image_output_folder, original_image_dir)
 
 
 if __name__ == '__main__':
-    original_image_dir = '/home/zafar/old_pc/data_sets/robot-project-datasets/burr_dataset/Bur-mask.v1i.coco-segmentation/train'  # Where your original images are stored
+    original_image_dir = '/home/zafar/old_pc/data_sets/mvtec_anomaly_detection/Abrasion-Scratch/test/Abrasion-Scratch Detection.v1i.coco-segmentation/train'  # Where your original images are stored
     json_file = original_image_dir+'/'+'_annotations.coco.json'
     mask_output_folder = original_image_dir+'/masks'  # Modify this as needed. Using val2 so my data is not overwritten
     image_output_folder = original_image_dir+'/images'  # 

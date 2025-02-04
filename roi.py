@@ -8,9 +8,13 @@ import os
 
 class ROI_model:
     '''Class to extract different pin ROIs'''
-    def __init__(self, modelPath: str):
+    def __init__(self, modelPath: str, warmup_runs=1):
 
         self.model = YOLO(modelPath)
+
+        dummy_image = np.zeros((640, 640, 3), dtype=np.uint8)
+        for _ in range(warmup_runs):
+            _ = self.model.predict(source=dummy_image, conf=0.6, verbose=False)
 
     def visPreds(self, img=None, preds=None, obb=False, boxType='xywh', color=(0,0,255)):
         if obb:
@@ -177,7 +181,7 @@ class ROI_model:
             preds  = np.vstack((preds, _preds))
         return preds[preds[:, -1] > conf_thres]
 
-    def predYOLO_obb(self, img, conf=0.6, device='cpu'):  
+    def predYOLO_obb(self, img, conf=0.5, device='cpu'):  
         results = self.model.predict(img, conf=conf, device=device, verbose=True)
         preds   = self.processOBB(results, conf)
         return preds
@@ -301,7 +305,39 @@ class ROI_model:
             r[r < filterThresh] = 0
             roiImg  = cv2.merge((b, g, r))
             roiMask = mask
+            roiBox  = ''
         elif roi=='Bur':
+            # _img = copy.deepcopy(img)
+            # # self.visPreds(_img, obbBoxes, obb=True)
+            # for box in obbBoxes:
+            #     x1 = int(box[6]) -10 if (int(box[6]) -10)>0 else 0
+            #     x2 = int(box[2]) +10
+            #     y1 = int(box[7]) -10 if (int(box[7]) -10)>0 else 0
+            #     y2 = int(box[3]) +10 if (int(box[3]+10) < img.shape[0]) else img.shape[0]
+            #     pinImg = img[y1:y2, x1:x2]        # TopL (6,7), BotomR (2,3)
+
+            #     grayPin_img = cv2.cvtColor(pinImg, cv2.COLOR_BGR2GRAY)
+            #     grayPin_img[grayPin_img>50] = 255
+
+            #     y = int(((y2-y1)/3)*2)
+            #     _y = (y2-y1) - 20
+            #     row = grayPin_img[y, :]
+            #     x = np.argmax(row==255)-2
+            #     _x = len(row) - 1 - np.argmax(row[::-1] == 255)
+
+            #     cv2.line(grayPin_img, (x,y), (_x,y), (0,0,255))
+            #     cv2.line(grayPin_img, (x,_y), (_x,_y), (0,0,255))
+
+            #     # grayPin_img = 255 - grayPin_img
+
+            #     # edges = cv2.Canny(grayPin_img, 0, 255)
+
+            #     # kernel  = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+            #     # edges = cv2.morphologyEx(grayPin_img, cv2.MORPH_ERODE, kernel)
+
+            #     cv2.imshow('', grayPin_img)
+            #     cv2.waitKey()
+            #     cv2.destroyAllWindows()
             roiBox = self.ROIbox(obbBoxes, padding=(30,5))
             # mask[roiBox[1]:roiBox[3],roiBox[0]:roiBox[2]] = 255
             # roiImg = cv2.bitwise_and(img,img,mask=mask)
@@ -321,7 +357,7 @@ class ROI_model:
             # roiImg = cv2.bitwise_and(roiImg,roiImg,mask=~mask)
             roiImg[np.where(mask>0)]  = (150,230,240)
             roiMask[np.where(mask>0)] = 0       
-        return roiImg, roiMask    
+        return roiImg, roiMask, roiBox    
 
     def ROIbox(self, obbPreds, width=1920, height=1280, padding=(20,20)):
         x_min = int(np.min(obbPreds[:, [0, 2, 4, 6]])) - padding[0]
@@ -368,7 +404,7 @@ class ROI_model:
         #     pin1, pin2 = self.processPins(preds, 'Top1', (225,635), 1)
 
         if surface=='Front11':
-            roi     = [80, 100, 1830, 870]      # to filter out unwanted predictions not in the ROI
+            roi     = [75, 95, 1835, 875]      # to filter out unwanted predictions not in the ROI
             preds   = self.filterPreds(preds, roi)
             pin1, pin2 = self.processPins(img, preds, 'Front11', -1)
         elif surface=='Front12':
@@ -376,7 +412,7 @@ class ROI_model:
             # preds   = self.filterPreds(preds, roi)
             pin1, pin2 = self.processPins(img, preds, 'Front12', -1)    
         elif surface=='Front21':
-            roi     = [120, 100, 1845, 870]
+            roi     = [115, 95, 1850, 875]
             preds   = self.filterPreds(preds, roi)
             pin1, pin2 = self.processPins(img, preds, 'Front21', -1)
         elif surface=='Front22':
@@ -385,17 +421,20 @@ class ROI_model:
             pin1, pin2 = self.processPins(img, preds, 'Front22', -1)    
             # self.visPreds(_img1, preds, obb=True)
         elif surface=='Top11':
-            roi     = [130, 550, 1880, 1210]
+            roi     = [120, 520, 1895, 1225]
+            # self.visPreds(img, preds, obb=True)
             preds   = self.filterPreds(preds, roi)
-            pin1, _ = self.processPins(img, preds, 'Top11', -3)
+            pin1, pin2 = self.processPins(img, preds, 'Top11', -3)
         elif surface=='Top12':
             # roi     = [120, 710, 1890, 1280]
             # preds   = self.filterPreds(preds, roi)
-            pin1, _ = self.processPins(img, preds, 'Top12', -3)
+            pin1, pin2 = self.processPins(img, preds, 'Top12', -3)
         elif surface=='Top21':
-            roi = [135, 530, 1895, 1200]
+            roi = [125, 520, 1905, 1215]
+            # self.visPreds(img, preds, obb=True)
             preds   = self.filterPreds(preds, roi)
-            pin1, _ = self.processPins(img, preds, 'Top21', -3)
+            # self.visPreds(img, preds, obb=True)
+            pin1, pin2 = self.processPins(img, preds, 'Top21', -3)
         elif surface=='Top22':
             # roi     = [150, 690, 1915, 1280]
             # cv2.rectangle(img, (roi[0],roi[1]), (roi[2],roi[3]), (0,0,255), 2)
@@ -403,7 +442,7 @@ class ROI_model:
             # cv2.waitKey()
             # cv2.destroyAllWindows()
             # preds   = self.filterPreds(preds, roi)
-            pin1, _ = self.processPins(img, preds, 'Top22', -3)   
+            pin1, pin2 = self.processPins(img, preds, 'Top22', -3)   
 
         # visualize pin ROIs
         # self.visPreds(_img1, pin1, obb=True)
@@ -416,16 +455,16 @@ class ROI_model:
             
             lowerPin_box = self.ROIbox(pin2)
              
-            fullPin_img = self.segment(img, np.vstack((pin1,pin2)), 'Pin')
+            fullPin_img, fullMask, _ = self.segment(img, np.vstack((pin1,pin2)), 'Pin')
             Pin_img     = fullPin_img[upperPin_box[1]:upperPin_box[3], upperPin_box[0]:upperPin_box[2]]
             Pin_img2    = fullPin_img[lowerPin_box[1]:lowerPin_box[3], lowerPin_box[0]:lowerPin_box[2]]
             pinBox      = [upperPin_box, lowerPin_box]
         elif 'Top' in surface:
             pinBox = self.ROIbox(pin1)
-            fullPin_img = self.segment(img, pin1, 'Pin', 30)
+            fullPin_img, fullMask, _ = self.segment(img, pin1, 'Pin', 30)
             Pin_img     = fullPin_img[pinBox[1]:pinBox[3], pinBox[0]:pinBox[2]]
             Pin_img2    = None
-        return fullPin_img, Pin_img, Pin_img2, pinBox    
+        return fullPin_img, Pin_img, Pin_img2, pinBox, pin1, pin2, fullMask   
     
     def burrROI(self, img, surface):
         # Pin ROI detection
@@ -450,7 +489,7 @@ class ROI_model:
 
         # for new images--------------------------------------------------
         if surface=='Front11':
-            roi     = [80, 100, 1830, 870]      # to filter out unwanted predictions not in the ROI
+            roi     = [75, 95, 1835, 875]      # to filter out unwanted predictions not in the ROI
             preds   = self.filterPreds(preds, roi)
             pin1, _ = self.processPins(img, preds, 'Front11', -1)
         elif surface=='Front12':
@@ -458,7 +497,7 @@ class ROI_model:
             # preds   = self.filterPreds(preds, roi)
             pin1, _ = self.processPins(img, preds, 'Front12', -1)    
         elif surface=='Front21':
-            roi     = [120, 100, 1845, 870]
+            roi     = [115, 95, 1850, 875]
             preds   = self.filterPreds(preds, roi)
             pin1, _ = self.processPins(img, preds, 'Front21', -1)
         elif surface=='Front22':
@@ -467,17 +506,17 @@ class ROI_model:
             pin1, _ = self.processPins(img, preds, 'Front22', -1)    
             # self.visPreds(_img1, preds, obb=True)
         elif surface=='Top11':
-            roi     = [130, 550, 1880, 1210]
+            roi     = [120, 520, 1895, 1225]
             preds   = self.filterPreds(preds, roi)
-            pin1, _ = self.processPins(img, preds, 'Top11', -3)
+            pin1, _ = self.processPins(img, preds, 'Top11', -2)
         elif surface=='Top12':
             # roi     = [120, 710, 1890, 1280]
             # preds   = self.filterPreds(preds, roi)
-            pin1, _ = self.processPins(img, preds, 'Top12', -3)
+            pin1, _ = self.processPins(img, preds, 'Top12', -2)
         elif surface=='Top21':
-            roi = [135, 530, 1895, 1200]
+            roi = [125, 520, 1905, 1215]
             preds   = self.filterPreds(preds, roi)
-            pin1, _ = self.processPins(img, preds, 'Top21', -3)
+            pin1, _ = self.processPins(img, preds, 'Top21', -2)
         elif surface=='Top22':
             # roi     = [150, 690, 1915, 1280]
             # cv2.rectangle(img, (roi[0],roi[1]), (roi[2],roi[3]), (0,0,255), 2)
@@ -485,7 +524,7 @@ class ROI_model:
             # cv2.waitKey()
             # cv2.destroyAllWindows()
             # preds   = self.filterPreds(preds, roi)
-            pin1, _ = self.processPins(img, preds, 'Top22', -3)            
+            pin1, _ = self.processPins(img, preds, 'Top22', -2)            
               
 
         # visualize pin ROIs
@@ -494,27 +533,28 @@ class ROI_model:
 
         # ROI segmentation (based on the refined pin ROIs)
         # Here only the Bur region will be retained in the image
-        ROIbox  = self.ROIbox(pin1, padding=(30,30))
-        fullImg, fullMask = self.segment(img, pin1, 'Bur')
+        # ROIbox  = self.ROIbox(pin1, padding=(30,30))
+        fullImg, fullMask, ROIbox = self.segment(img, pin1, 'Bur')
         burImg  = fullImg[ROIbox[1]:ROIbox[3], ROIbox[0]:ROIbox[2]]
         burMask = fullMask[ROIbox[1]:ROIbox[3], ROIbox[0]:ROIbox[2]]
-        ROIbox  = [f'{int(ROIbox[0])} {int(ROIbox[1])} {int(ROIbox[2])} {int(ROIbox[3])}']
-        return fullImg, fullMask, burImg, burMask, ROIbox
+        # ROIbox  = [f'{int(ROIbox[0])} {int(ROIbox[1])} {int(ROIbox[2])} {int(ROIbox[3])}']
+        return fullImg, fullMask, burImg, burMask, ROIbox, pin1
 
 if __name__=='__main__':        
     # _path      = '/home/zafar/old_pc/data_sets/robot-project-datasets/TML_bur_original/2024-12-23_original/un_confirmed/front'
-    _path      = '/home/zafar/old_pc/data_sets/robot-project-datasets/roi-test-exp'
+    _path      = '/home/zafar/old_pc/data_sets/robot-project-datasets/pin_anomaly_data/Abrasion/Top-pin_auto_1'
     # _path      = '/home/zafar/old_pc/data_sets/robot-project-datasets/roi-test-exp'
     # _path      = '/home/zafar/old_pc/data_sets/robot-project-datasets/SystemStart-20250110-151428/selected_data/all_anomaly'
     # _path      = '/home/zafar/old_pc/data_sets/robot-project-datasets/SystemStart-20250110-151428/selected_data/Top-pin_22'
     model_path = 'runs/TML-Pin-ROI/coco-pretrain/Exp1/train7/weights/best.pt'
-    savePath   = '/home/zafar/old_pc/data_sets/robot-project-datasets/roi-test-exp'
+    savePath   = '/home/zafar/old_pc/data_sets/mvtec_anomaly_detection/Abrasion-Scratch/test/'
     roiModel   = ROI_model(model_path)
 
     pathList = glob.glob(f'{_path}/*.png')
+    idx = 0
     
     for imgPath in pathList:
-        name    = imgPath.split('/')[-1]
+        name    = imgPath.split('/')[-1].split('Input-')[-1].split('__Cam')[0]
         surface = None
 
         # for old images------------------
@@ -528,22 +568,41 @@ if __name__=='__main__':
         #     surface = 'Top2'
 
         # for new images---------------------------------------------------------
-        if 'Front-pin_11' in imgPath:       # front surface 1, focus on first row
-            surface = 'Front11'
-        elif 'Front-pin_12' in imgPath:     # front surface 1, focus on second row
-            surface = 'Front12'    
-        elif 'Front-pin_21' in imgPath:     # front surface 2, focus on first row
+        
+        # if 'Front-pin_11' in imgPath:       # front surface 1, focus on first row
+        #     surface = 'Front11'
+        # elif 'Front-pin_12' in imgPath:     # front surface 1, focus on second row
+        #     surface = 'Front12'    
+        # elif 'Front-pin_21' in imgPath:     # front surface 2, focus on first row
+        #     surface = 'Front21'
+        # elif 'Front-pin_22' in imgPath:     # front surface 2, focus on second row
+        #     surface = 'Front22'    
+        # elif 'Top-pin_11' in imgPath:       # top surface 1, focus on first row
+        #     surface = 'Top11'
+        # elif 'Top-pin_12' in imgPath:       # top surface 1, focus on second row
+        #     surface = 'Top12'    
+        # elif 'Top-pin_21' in imgPath:       # top surface 2, focus on first row     
+        #     surface = 'Top21'
+        # elif 'Top-pin_22' in imgPath:       # top surface 2, focus on second row
+        #     surface = 'Top22'
+
+        
+        if "Front-pin-2nd_auto_0" in imgPath:
+            surface = 'Front12'
+        elif "Front-pin-2nd_auto_1" in imgPath:
+            surface = 'Front22'
+        elif "Front-pin_auto_0" in imgPath:
             surface = 'Front21'
-        elif 'Front-pin_22' in imgPath:     # front surface 2, focus on second row
-            surface = 'Front22'    
-        elif 'Top-pin_11' in imgPath:       # top surface 1, focus on first row
-            surface = 'Top11'
-        elif 'Top-pin_12' in imgPath:       # top surface 1, focus on second row
-            surface = 'Top12'    
-        elif 'Top-pin_21' in imgPath:       # top surface 2, focus on first row     
+        elif "Front-pin_auto_1" in imgPath:
+            surface = 'Front11'
+        elif "Top-pin-2nd_auto_0" in imgPath:
+            surface = 'Top12'
+        elif "Top-pin-2nd_auto_1" in imgPath:
+            surface = 'Top22'
+        elif "Top-pin_auto_0" in imgPath:
             surface = 'Top21'
-        elif 'Top-pin_22' in imgPath:       # top surface 2, focus on second row
-            surface = 'Top22'            
+        elif "Top-pin_auto_1" in imgPath:
+            surface = 'Top11'                
 
         if surface:
             img  = cv2.imread(imgPath)
@@ -562,29 +621,194 @@ if __name__=='__main__':
             # cv2.destroyAllWindows()
 
             # TODO: get back the box region for accurateley draw predictions on to real image
-            # fullImg, pinImg, pinImg2, roiBox = roiModel.pinROI(img, surface)
-            # cv2.imshow('', fullImg)
+            fullPin_img, Pin_img, Pin_img2, pinBox, pin1, pin2, fullMask = roiModel.pinROI(img, surface)
+
+            # cv2.imshow('', img)
             # cv2.waitKey()
-            # cv2.imshow('',pinImg)
+            # cv2.destroyAllWindows()
+
+            sorted_indices = np.argsort(pin1[:, 6])
+            sortedPins = pin1[sorted_indices]
+            # roiModel.visPreds(fullPin_img, sortedPins, obb=True)
+
+            if surface=='Top21':
+                if not os.path.exists(f'{savePath}train/good'):
+                    os.makedirs(f'{savePath}train/good')
+                if not os.path.exists(f'{savePath}fg_mask'):
+                    os.makedirs(f'{savePath}fg_mask')
+
+                crop1 = sortedPins[0:4, :]
+                top = crop1[0,-2:]
+                bottom = crop1[-1,2:4]
+                crop = fullPin_img[int(top[1]-10):int(bottom[1]+10), int(top[0]-10): int(bottom[0]+10)]
+                crop = cv2.resize(crop, (1024,1024))
+                mask = fullMask[int(top[1]-10):int(bottom[1]+10), int(top[0]-10): int(bottom[0]+10)]
+                mask = cv2.resize(mask, (1024,1024))
+                imgName = savePath+'train/good/'+name+f'_{idx}.png'
+                MaskName = savePath+'fg_mask/'+name+f'_{idx}.png'
+                cv2.imwrite(imgName, crop)
+                cv2.imwrite(MaskName, mask)
+                idx+=1
+                # cv2.imshow('', crop)
+                # cv2.waitKey()
+                # cv2.destroyAllWindows()
+                
+                crop2 = sortedPins[4:8, :]
+                top = crop2[0,-2:]
+                bottom = crop2[-1,2:4]
+                crop = fullPin_img[int(top[1]-10):int(bottom[1]+10), int(top[0]-10): int(bottom[0]+10)]
+                crop = cv2.resize(crop, (1024,1024))
+                mask = fullMask[int(top[1]-10):int(bottom[1]+10), int(top[0]-10): int(bottom[0]+10)]
+                mask = cv2.resize(mask, (1024,1024))
+                imgName = savePath+'train/good/'+name+f'_{idx}.png'
+                MaskName = savePath+'fg_mask/'+name+f'_{idx}.png'
+                cv2.imwrite(imgName, crop)
+                cv2.imwrite(MaskName, mask)
+                idx+=1
+                # cv2.imshow('', crop)
+                # cv2.waitKey()
+                # cv2.destroyAllWindows()
+
+                crop3 = sortedPins[8:12, :]
+                top = crop3[0,-2:]
+                bottom = crop3[-1,2:4]
+                crop = fullPin_img[int(top[1]-10):int(bottom[1]+10), int(top[0]-10): int(bottom[0]+10)]
+                crop = cv2.resize(crop, (1024,1024))
+                mask = fullMask[int(top[1]-10):int(bottom[1]+10), int(top[0]-10): int(bottom[0]+10)]
+                mask = cv2.resize(mask, (1024,1024))
+                imgName = savePath+'train/good/'+name+f'_{idx}.png'
+                MaskName = savePath+'fg_mask/'+name+f'_{idx}.png'
+                cv2.imwrite(imgName, crop)
+                cv2.imwrite(MaskName, mask)
+                idx+=1
+                # cv2.imshow('', crop)
+                # cv2.waitKey()
+                # cv2.destroyAllWindows()
+                
+                crop4 = sortedPins[12:16, :]
+                top = crop4[0,-2:]
+                bottom = crop4[-1,2:4]
+                crop = fullPin_img[int(top[1]-10):int(bottom[1]+10), int(top[0]-10): int(bottom[0]+10)]
+                crop = cv2.resize(crop, (1024,1024))
+                mask = fullMask[int(top[1]-10):int(bottom[1]+10), int(top[0]-10): int(bottom[0]+10)]
+                mask = cv2.resize(mask, (1024,1024))
+                imgName = savePath+'train/good/'+name+f'_{idx}.png'
+                MaskName = savePath+'fg_mask/'+name+f'_{idx}.png'
+                cv2.imwrite(imgName, crop)
+                cv2.imwrite(MaskName, mask)
+                idx+=1
+                # cv2.imshow('', crop)
+                # cv2.waitKey()
+                # cv2.destroyAllWindows()
+
+                crop5 = sortedPins[16:, :]
+                top = crop5[0,-2:]
+                bottom = crop5[-1,2:4]
+                crop = fullPin_img[int(top[1]-10):int(bottom[1]+10), int(top[0]-10): int(bottom[0]+10)]
+                crop = cv2.resize(crop, (1024,1024))
+                mask = fullMask[int(top[1]-10):int(bottom[1]+10), int(top[0]-10): int(bottom[0]+10)]
+                mask = cv2.resize(mask, (1024,1024))
+                imgName = savePath+'train/good/'+name+f'_{idx}.png'
+                MaskName = savePath+'fg_mask/'+name+f'_{idx}.png'
+                cv2.imwrite(imgName, crop)
+                cv2.imwrite(MaskName, mask)
+                idx+=1
+                # cv2.imshow('', crop)
+                # cv2.waitKey()
+                # cv2.destroyAllWindows()
+
+                # print()
+            elif surface=='Top11':
+                if not os.path.exists(f'{savePath}train/good'):
+                    os.makedirs(f'{savePath}train/good')
+                if not os.path.exists(f'{savePath}fg_mask'):
+                    os.makedirs(f'{savePath}fg_mask')
+
+                crop1 = sortedPins[0:6, :]
+                top = crop1[0,-2:]
+                bottom = crop1[-1,2:4]
+                crop = fullPin_img[int(top[1]-10):int(bottom[1]+10), int(top[0]-10): int(bottom[0]+10)]
+                crop = cv2.resize(crop, (1024,1024))
+                mask = fullMask[int(top[1]-10):int(bottom[1]+10), int(top[0]-10): int(bottom[0]+10)]
+                mask = cv2.resize(mask, (1024,1024))
+                imgName = savePath+'train/good/'+name+f'_{idx}.png'
+                MaskName = savePath+'fg_mask/'+name+f'_{idx}.png'
+                cv2.imwrite(imgName, crop)
+                cv2.imwrite(MaskName, mask)
+                idx+=1
+                # cv2.imshow('', crop)
+                # cv2.waitKey()
+                # cv2.destroyAllWindows()
+                
+                crop2 = sortedPins[6:12, :]
+                top = crop2[0,-2:]
+                bottom = crop2[-1,2:4]
+                crop = fullPin_img[int(top[1]-10):int(bottom[1]+10), int(top[0]-10): int(bottom[0]+10)]
+                crop = cv2.resize(crop, (1024,1024))
+                mask = fullMask[int(top[1]-10):int(bottom[1]+10), int(top[0]-10): int(bottom[0]+10)]
+                mask = cv2.resize(mask, (1024,1024))
+                imgName = savePath+'train/good/'+name+f'_{idx}.png'
+                MaskName = savePath+'fg_mask/'+name+f'_{idx}.png'
+                cv2.imwrite(imgName, crop)
+                cv2.imwrite(MaskName, mask)
+                idx+=1
+                # cv2.imshow('', crop)
+                # cv2.waitKey()
+                # cv2.destroyAllWindows()
+
+                crop3 = sortedPins[12:18, :]
+                top = crop3[0,-2:]
+                bottom = crop3[-1,2:4]
+                crop = fullPin_img[int(top[1]-10):int(bottom[1]+10), int(top[0]-10): int(bottom[0]+10)]
+                crop = cv2.resize(crop, (1024,1024))
+                mask = fullMask[int(top[1]-10):int(bottom[1]+10), int(top[0]-10): int(bottom[0]+10)]
+                mask = cv2.resize(mask, (1024,1024))
+                imgName = savePath+'train/good/'+name+f'_{idx}.png'
+                MaskName = savePath+'fg_mask/'+name+f'_{idx}.png'
+                cv2.imwrite(imgName, crop)
+                cv2.imwrite(MaskName, mask)
+                idx+=1
+                # cv2.imshow('', crop)
+                # cv2.waitKey()
+                # cv2.destroyAllWindows()
+                
+                crop4 = sortedPins[18:21, :]
+                top = crop4[0,-2:]
+                bottom = crop4[-1,2:4]
+                crop = fullPin_img[int(top[1]-10):int(bottom[1]+10), int(top[0]-10): int(bottom[0]+10)]
+                crop = cv2.resize(crop, (1024,1024))
+                mask = fullMask[int(top[1]-10):int(bottom[1]+10), int(top[0]-10): int(bottom[0]+10)]
+                mask = cv2.resize(mask, (1024,1024))
+                imgName = savePath+'train/good/'+name+f'_{idx}.png'
+                MaskName = savePath+'fg_mask/'+name+f'_{idx}.png'
+                cv2.imwrite(imgName, crop)
+                cv2.imwrite(MaskName, mask)
+                idx+=1
+                # cv2.imshow('', crop)
+                # cv2.waitKey()
+                # cv2.destroyAllWindows()
+
+
+                print()
+            # cv2.imshow('', fullPin_img)
             # cv2.waitKey()
-            # if pinImg2 is not None:
-            #     cv2.imshow('', pinImg2)
+            # cv2.imshow('',Pin_img)
+            # cv2.waitKey()
+            # if Pin_img2 is not None:
+            #     cv2.imshow('', Pin_img2)
             #     cv2.waitKey()
             # cv2.destroyAllWindows()
 
-            fullImg, fullMask, burImg, burMask, ROIbox = roiModel.burrROI(img, surface)
+            # print()
+
+            # fullImg, fullMask, burImg, burMask, ROIbox = roiModel.burrROI(img, surface)
             # roiModel.burrROI(img, surface)
 
             # savenameFull_img = f'{savePath}/fullImg/{name}'
             # savenameFull_mask = f'{savePath}/fullmask/{name}' 
             # savenameBurr_img = f'{savePath}/burrROI_img/{name}'
             # savenameBurr_mask = f'{savePath}/burrROI_mask/{name}'
-            # savenameBox  = f'{savePath}/fullImg/{name.split(".")[0]}.txt'
-
-            # if not os.path.exists(f'{savePath}/burr'):
-            #     os.makedirs(f'{savePath}/burr')
-            # if not os.path.exists(f'{savePath}/fg_mask'):
-            #     os.makedirs(f'{savePath}/fg_mask')    
+            # savenameBox  = f'{savePath}/fullImg/{name.split(".")[0]}.txt'    
             
             # burImg = cv2.resize(burImg, (1024,1024))
             # savenameBurr_img = f'{savePath}/burr-full/{name}'
