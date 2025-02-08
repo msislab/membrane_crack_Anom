@@ -1,0 +1,6 @@
+train: "/home/zafar/old_pc/data_sets/robot-project-datasets/pin_anomaly_data/Abrasion-Scratch_pindata/Abrasion-ScratchYolo_dataset/train.txt"
+val  : "/home/zafar/old_pc/data_sets/robot-project-datasets/pin_anomaly_data/Abrasion-Scratch_pindata/Abrasion-ScratchYolo_dataset/val.txt"
+test : "/home/zafar/old_pc/data_sets/robot-project-datasets/pin_anomaly_data/Abrasion-Scratch_pindata/Abrasion-ScratchYolo_dataset/val.txt"
+
+nc   : 1
+names: ["defect"]

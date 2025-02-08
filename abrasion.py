@@ -178,7 +178,9 @@ def parseArgs():
 
 def main():
     args   = parseArgs()
-    imgs   = glob.glob(f'{args.dataPath}/*.png')
+    # imgs   = glob.glob(f'{args.dataPath}/*.png')
+    with open(args.dataPath, 'r') as f:
+        imgs = f.readlines()
     imgs   = natsorted(imgs)
     kernel =  cv2.getStructuringElement(cv2.MORPH_RECT,(3,3))
 
@@ -187,12 +189,13 @@ def main():
     roiModel = ROI_model(args.roiModel)
 
     # model.to(device)
-    saveDir = "/home/zafar/old_pc/data_sets/robot-project-datasets/pin_anomaly_data/Abrasion-Scratch_pindata/pinImgs"
+    saveDir = "/home/zafar/old_pc/data_sets/robot-project-datasets/normal-pin-data/Abrasion-Scratch/normalPin_data"
     if not os.path.exists(saveDir):
         os.makedirs(saveDir)
     idx = 0
 
     for imgPath in tqdm.tqdm(imgs):
+        imgPath = imgPath.strip()
         args.path = imgPath
 
         if 'Front-pin_auto_1' in imgPath:       # front surface 1, focus on first row
