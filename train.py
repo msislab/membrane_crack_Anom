@@ -2,7 +2,7 @@ from ultralytics import YOLO
 import argparse
 import torch
 
-def train_yolov8():
+def train_yolov11():
     args   = parseArgs()
     # choose between training from scratch and training using a checkpoint
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
@@ -53,4 +53,4 @@ def parseArgs():
 
 if __name__ == "__main__":
     # Run training
-    train_yolov8()
+    train_yolov11()
