@@ -11,19 +11,19 @@ colorama.init(autoreset=True)
 from roi import ROI_model
 import copy
 from patchify import patchify
-import matplotlib
-matplotlib.use("TkAgg")
-import matplotlib.pyplot as plt
+# import matplotlib
+# matplotlib.use("TkAgg")
+# import matplotlib.pyplot as plt
 
 
-def drawBox(img, boxes, obb=False, boxType='xywh', color=(0,255,0), thickness=1):
+def drawBox(img, boxes, obb=False, boxType='xywh', color=(0,255,0), thickness=1, adj=0):
     if obb:
         # print('visualizing obb preds')
         for box in boxes:
-            _box = np.array([[int(box[0]), int(box[1])],
-                             [int(box[2]), int(box[3])],
-                             [int(box[4]), int(box[5])],
-                             [int(box[6]), int(box[7])]])
+            _box = np.array([[int(box[0])-adj, int(box[1])-adj],
+                             [int(box[2])+adj, int(box[3])-adj],
+                             [int(box[4])+adj, int(box[5])+adj],
+                             [int(box[6])-adj, int(box[7])+adj]])
             _box = _box.reshape(-1,1,2)
             img  = cv2.polylines(img, [_box], isClosed=True, color=color, thickness=thickness)
             # text = f"{box[0]};{box[-1]}"
@@ -83,6 +83,30 @@ def processOBB(yoloOBB_rslt=[], patchPosz=None):
         # cv2.destroyAllWindows()
 
     # preds = np.delete(preds, 0, axis=0)
+    return preds
+
+def processDet(yolo_rslt=[], pinPoses=[]):
+    preds = []
+    for i,result in enumerate(yolo_rslt):
+        pinPos = pinPoses[i]
+        x1,x2,y1,y2 = pinPos[6]-5, pinPos[2]+5, pinPos[7], pinPos[3]
+        w, h = x2-x1, y2-y1
+        boxes = result.boxes.xyxyn.cpu().numpy()
+        conf  = result.boxes.conf.cpu().numpy()
+        # _preds = np.hstack([clsz[:,None], boxes, conf[:,None]])
+        if boxes.shape[0]>0:
+            # annotimg = result[0].plot()
+            # cv2.imshow('',annotimg)
+            # cv2.waitKey()
+            # cv2.destroyAllWindows()
+            boxes[:,::2]  *= w
+            boxes[:,1::2] *= h
+            boxes[:,::2]  += x1
+            boxes[:,1::2] += y1
+            _preds = np.hstack([boxes, conf[:,None]])
+            preds.append(_preds)
+        else:
+            preds.append(np.array([]))    
     return preds
 
 def patchToimPred(preds=[], patchCoords=[]):
@@ -157,22 +181,57 @@ def checkPin(pinImg, kernel):
     # cv2.destroyAllWindows()
     return AnomalyFlag
 
+def _filter(abrDet, areaTh=50):
+    areas = (abrDet[:, 2] - abrDet[:, 0]) * (abrDet[:, 3] - abrDet[:, 1])   
+    filteredDets = abrDet[areas > areaTh]
+    return filteredDets
+
+def highLight(img, preds, alpha=0.4):
+    overlay = np.zeros_like(img)
+    for box in preds:
+        x1, y1, x2, y2 = box[0:4]
+        cv2.rectangle(overlay, (int(x1-2), int(y1-1)), (int(x2+2), int(y2+1)), (0, 0, 255), -1)
+    cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, img)
+    return img
+
+def detPostProcess(abrDets, pinPoses, img, AnomalyFlag=False):
+    idxs = [i for i, arr in enumerate(abrDets) if arr.shape[0] > 0]
+    _pinPoses = []
+    _abrDets = np.zeros((5,), dtype=np.float32)
+    for idx in idxs:
+        pinPose = pinPoses[idx]        
+        abrDet  = abrDets[idx]
+        _abrDet = _filter(abrDet)
+        if _abrDet.shape[0] > 0:
+            _abrDets = np.vstack((_abrDets, _abrDet))
+        img = drawBox(img, np.array([pinPose]), obb=True, color=(0,0,255), thickness=1, adj=5)
+        # img = drawBox(img, _abrDets[1:,:], boxType='xyxy', color=(255,0, 255))
+        # cv2.imshow('', img)
+        # cv2.waitKey()
+        # cv2.destroyAllWindows()
+    if (_abrDets.ndim==2) and (_abrDets.shape[0]>1):
+        _abrDets = _abrDets[1:,:]
+        img = highLight(img, _abrDets)
+        #TODO: Put text here (Not Good)
+        AnomalyFlag = True
+    #TODO: Put text here (Good)
+    return img, _abrDets, AnomalyFlag
+
 def parseArgs():
     parser = argparse.ArgumentParser(description='Demo')
     parser.add_argument('--dataPath', type=str, default='',
                         help='Provide img directory path')
-    # parser.add_argument('--detModel', type=str, default=None,
-    #                     help='Provide model.pt path')
+    parser.add_argument('--detModel', type=str, default=None,
+                        help='Provide model.pt path')
     parser.add_argument('--roiModel', type=str, default=None,
                         help='Provide model.pt path')
-    # parser.add_argument('--detConf', type=float, default=0.5,
-    #                     help='Choose a confidence threshold between 0 and 1')
+    parser.add_argument('--detConf', type=float, default=0.5,
+                        help='Choose a confidence threshold between 0 and 1')
     parser.add_argument('--roiConf', type=float, default=0.5,
                         help='Choose a confidence threshold between 0 and 1')
     parser.add_argument('--device', type=int, default=0,
                         help='Choose a gpu device')
-    # parser.add_argument('--imgSize', type=int, default=640,
-    #                     help='Choose box type for annotation')
+    parser.add_argument('--dataPrep', action='store_true')
     args = parser.parse_args()
     return args
 
@@ -187,7 +246,7 @@ def main():
     # device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
 
     roiModel = ROI_model(args.roiModel)
-
+    detModel = YOLO(args.detModel)
     # model.to(device)
     saveDir = "/home/zafar/old_pc/data_sets/robot-project-datasets/normal-pin-data/Abrasion-Scratch/normalPin_data"
     if not os.path.exists(saveDir):
@@ -219,7 +278,7 @@ def main():
         # _img = copy.deepcopy(img)
         fullPin_img, Pin_img, Pin_img2, pinBox, pin1, pin2, fullMask = roiModel.pinROI(img=img, surface=surface)
 
-        # cv2.imshow('', Pin_img)
+        # cv2.imshow('', img)
         # cv2.waitKey()
         # # cv2.imshow('', _img)
         # # cv2.waitKey()
@@ -227,31 +286,25 @@ def main():
         # _img = drawBox(_img, np.array([ROIbox]), boxType='xyxy')
         sorted_indices = np.argsort(pin1[:, 6])
         pinPreds = pin1[sorted_indices]
-        decision = []
-        for i,pin in enumerate(pinPreds):
-            saveName = f"{saveDir}/{idx}.png"
+        pinImgs  = []
+        for i,pin in enumerate(pinPreds):        
             idx+=1
             pinImg = getPin(fullPin_img, pin, kernel)
-            pinImg = cv2.resize(pinImg, (640,640))
-            cv2.imwrite(saveName, pinImg)
-            # l = getBrightnessLevel(pinImg)
-            # if l>0.53 and pinImg.shape[1]<60:
-            #     brightnessDiff = round(((l-0.52)/0.52), 3)
-            #     print()
-            # elif l>0.59 and pinImg.shape[1]>60:
-            #     pass
-            # pinImg = cv2.resize(pinImg, (200, pinImg.shape[0]), cv2.INTER_CUBIC)
-            # fullPin_img = drawBox(fullPin_img, np.array([pin]), obb=True)
-            # cv2.imshow(f'{round(l,2), pinImg.shape[1]}', pinImg)
-            # cv2.imshow('', pinImg)
-            # cv2.waitKey()
-            # cv2.destroyAllWindows
-            # cv2.imshow('', _img)
-            # cv2.waitKey()
-            # cv2.destroyAllWindows()
-            # anom = checkPin(pinImg, kernel)
-            # decision.append(anom)
-        print()
+            if args.dataPrep:
+                saveName = f"{saveDir}/{idx}.png"
+                pinImg = cv2.resize(pinImg, (640,640))
+                cv2.imwrite(saveName, pinImg)
+            else:
+                pinImg = cv2.resize(pinImg, (640,640))
+                pinImgs.append(pinImg)
+        dets    = detModel.predict(pinImgs, imgsz=(640,640), conf=args.detConf, verbose=False)
+        abrDets = processDet(dets, pinPreds)
+        annotImg, detections, anom = detPostProcess(abrDets, pinPreds, img)
+        # img = drawBox(img, abrDets, boxType='xyxy')
+        cv2.imshow('',annotImg)
+        cv2.waitKey()
+        cv2.destroyAllWindows()
+    print()
         
 
 if __name__=="__main__":
