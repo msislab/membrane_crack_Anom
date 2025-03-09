@@ -40,6 +40,7 @@ def parseArgs():
                         help='Choose box type for annotation')
     parser.add_argument('--imgSize', type=int, default=640,
                         help='Choose box type for annotation')
+    parser.add_argument('--img_format', type=str, default='.png')
     args = parser.parse_args()
     return args
 
@@ -99,27 +100,30 @@ def stats_obb(_Path, preds, iou_thres):
     img = cv2.imread(_Path)
     h,w,_ = img.shape
     labelPath = _Path.split('.jpg')[0] + '.txt'
-    boxes = []
-    with open(labelPath, 'r') as f:
-        for line in f.readlines():
-            boxStr = line.split()
-            box = [int(boxStr[0]),float(boxStr[1])*w, float(boxStr[2])*h, 
-                    float(boxStr[3])*w, float(boxStr[4])*h,
-                    float(boxStr[5])*w, float(boxStr[6])*h,
-                    float(boxStr[7])*w, float(boxStr[8])*h]
-            boxes.append(np.array(box))
-    boxes  = np.array(boxes)
-    tp, fp = find_overlaps(boxes, preds, stats=True)
-    # Fn_GT     = np.where(np.all(overlaps_ == 0, axis=1))[0]
-    # Fp_preds  = np.where(np.all(overlaps_ < iou_thres, axis=0))[0]
+    if os.path.exists(labelPath):
+        boxes = []
+        with open(labelPath, 'r') as f:
+            for line in f.readlines():
+                boxStr = line.split()
+                box = [int(boxStr[0]),float(boxStr[1])*w, float(boxStr[2])*h, 
+                        float(boxStr[3])*w, float(boxStr[4])*h,
+                        float(boxStr[5])*w, float(boxStr[6])*h,
+                        float(boxStr[7])*w, float(boxStr[8])*h]
+                boxes.append(np.array(box))
+        boxes  = np.array(boxes)
+        tp, fp = find_overlaps(boxes, preds, stats=True)
+        # Fn_GT     = np.where(np.all(overlaps_ == 0, axis=1))[0]
+        # Fp_preds  = np.where(np.all(overlaps_ < iou_thres, axis=0))[0]
 
-    total_Gt    = boxes.shape[0]
-    total_preds = preds.shape[0]
-    # tp = len(overlaps_[overlaps_>=iou_thres])
-    # fp = total_preds-tp
-    # print(total_preds, '\n', tp, '\n', fp)
-    # time.sleep(2)
-    return total_Gt, total_preds, tp, fp
+        total_Gt    = boxes.shape[0]
+        total_preds = preds.shape[0]
+        # tp = len(overlaps_[overlaps_>=iou_thres])
+        # fp = total_preds-tp
+        # print(total_preds, '\n', tp, '\n', fp)
+        # time.sleep(2)
+        return total_Gt, total_preds, tp, fp
+    else:
+        return 0, 0, 0, 0
 
 def drawBox(img, boxes, obb=False, boxType='xywh', color=(0,255,0), thickness=1):
     if obb:
@@ -169,57 +173,59 @@ def drawBox(img, boxes, obb=False, boxType='xywh', color=(0,255,0), thickness=1)
                 cv2.putText(img, text, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), thickness+1)      
     return img    
 
-def visPreds(GTpath=None, img=None, preds=None, obb=False, boxType='xywh', color=(0,0,255)):
+def visPreds(GTpath=None, img=None, preds=None, obb=False, boxType='xywh', format='.png', color=(0,0,255)):
     if GTpath:  # to visualize GT boxes for comparison
-        labelPath = GTpath.split('.jpg')[0] + '.txt'
-        if obb: # to visualize obb (oriented box with 4 points) preds
-            boxes = []
-            with open(labelPath, 'r') as f:
-                for line in f.readlines():
-                    boxStr = line.split()
-                    box = [int(boxStr[0]),float(boxStr[1])*img.shape[1], float(boxStr[2])*img.shape[0], 
-                            float(boxStr[3])*img.shape[1], float(boxStr[4])*img.shape[0],
-                            float(boxStr[5])*img.shape[1], float(boxStr[6])*img.shape[0],
-                            float(boxStr[7])*img.shape[1], float(boxStr[8])*img.shape[0]]
-                    boxes.append(np.array(box))
-            boxes = np.array(boxes)
-            _img  = drawBox(img, boxes, obb=obb, thickness=1)
-        else:   # to visualize box (rectangular box) preds
-            boxes = []
-            with open(labelPath, 'r') as f:
-                for line in f.readlines():
-                    boxStr = line.split()
-                    box = [int(boxStr[0]),float(boxStr[1])*img.shape[1], float(boxStr[2])*img.shape[0], 
-                            float(boxStr[3])*img.shape[1], float(boxStr[4])*img.shape[0]]
-                    boxes.append(np.array(box))
-            boxes = np.array(boxes)
-            _img  = drawBox(img, boxes, boxType=boxType)
+        labelPath = GTpath.split(f'{format}')[0] + '.txt'
+        if os.path.exists(labelPath):
+            if obb: # to visualize obb (oriented box with 4 points) preds
+                boxes = []
+                with open(labelPath, 'r') as f:
+                    for line in f.readlines():
+                        boxStr = line.split()
+                        box = [int(boxStr[0]),float(boxStr[1])*img.shape[1], float(boxStr[2])*img.shape[0], 
+                                float(boxStr[3])*img.shape[1], float(boxStr[4])*img.shape[0],
+                                float(boxStr[5])*img.shape[1], float(boxStr[6])*img.shape[0],
+                                float(boxStr[7])*img.shape[1], float(boxStr[8])*img.shape[0]]
+                        boxes.append(np.array(box))
+                boxes = np.array(boxes)
+                img  = drawBox(img, boxes, obb=obb, thickness=1)
+            else:   # to visualize box (rectangular box) preds
+                boxes = []
+                with open(labelPath, 'r') as f:
+                    for line in f.readlines():
+                        boxStr = line.split()
+                        box = [int(boxStr[0]),float(boxStr[1])*img.shape[1], float(boxStr[2])*img.shape[0], 
+                                float(boxStr[3])*img.shape[1], float(boxStr[4])*img.shape[0]]
+                        boxes.append(np.array(box))
+                boxes = np.array(boxes)
+                img  = drawBox(img, boxes, boxType=boxType)
     else:       # to visualize pred boxes
         if obb:
-            _img  = drawBox(img, preds, obb=obb, color=color, thickness=2)
+            img  = drawBox(img, preds, obb=obb, color=color, thickness=2)
         else:
-            _img  = drawBox(img, preds, boxType=boxType, color=color)
+            img  = drawBox(img, preds, boxType=boxType, color=color)
     
     # cv2.imshow('',_img)
     # cv2.waitKey()
     # cv2.destroyAllWindows()
 
-    return _img            
+    return img            
 
-def visGT(path=None, obb=False, boxType='xywh'):
+def visGT(path=None, format='.png', obb=False, boxType='xywh'):
     _img = cv2.imread(path)
-    labelPath = path.split('.jpg')[0] + '.txt'
+    labelPath = path.split(f'{format}')[0] + '.txt'
     if os.path.isfile(labelPath):
         boxes = []
         if obb:
             with open(labelPath, 'r') as f:
                 for line in f.readlines():
                     boxStr = line.split()
-                    box = [int(boxStr[0]),float(boxStr[1])*_img.shape[1], float(boxStr[2])*_img.shape[0], 
-                                float(boxStr[3])*_img.shape[1], float(boxStr[4])*_img.shape[0],
-                                float(boxStr[5])*_img.shape[1], float(boxStr[6])*_img.shape[0],
-                                float(boxStr[7])*_img.shape[1], float(boxStr[8])*_img.shape[0]]
-                    boxes.append(np.array(box))
+                    if boxStr:
+                        box = [int(boxStr[0]),float(boxStr[1])*_img.shape[1], float(boxStr[2])*_img.shape[0], 
+                                    float(boxStr[3])*_img.shape[1], float(boxStr[4])*_img.shape[0],
+                                    float(boxStr[5])*_img.shape[1], float(boxStr[6])*_img.shape[0],
+                                    float(boxStr[7])*_img.shape[1], float(boxStr[8])*_img.shape[0]]
+                        boxes.append(np.array(box))
             boxes = np.array(boxes)        
             _img  = drawBox(_img, boxes, obb=obb, thickness=1)
 
@@ -312,7 +318,11 @@ def predYOLO_obb(img, args, model, device='cpu'):
 
 def main():
     args  = parseArgs()
-    imgs  = glob.glob(f'{args.dataPath}/*.jpg')
+    if '.txt' in args.dataPath:
+        with open(args.dataPath, 'r') as f:
+            imgs = f.readlines()
+    else:
+        imgs  = glob.glob(f'{args.dataPath}/*{args.img_format}')
     imgs  = natsorted(imgs)
     stats = False
 
@@ -336,6 +346,7 @@ def main():
     total_time = 0
 
     for imgPath in tqdm.tqdm(imgs):
+        imgPath = imgPath.strip()
         args.path = imgPath
         print(imgPath)
         if args.save:
@@ -344,6 +355,9 @@ def main():
 
         _img    = cv2.imread(imgPath)
 
+        if _img.shape[:2] != (1280,1920):
+            _img = cv2.resize(_img, (1920,1280))
+
         # cv2.imshow('', _img)
         # cv2.waitKey()
         # cv2.destroyAllWindows()
@@ -351,15 +365,19 @@ def main():
         if args.PredictYolo:   
             annotImg = predyolo(img=_img, args=args, model=model)
         elif args.PredYolo_obb:
-            s = time.time()
+            # s = time.time()
             preds = predYOLO_obb(img=_img, args=args, model=model, device=device)
-            e = time.time()
-            total_time+=e-s
+            # e = time.time()
+            # total_time+=e-s
             # annotate image with preds
-            annotImg = visPreds(img=_img, preds=preds, obb=True)
+            annotImg = visPreds(img=_img, preds=preds, format=args.img_format, obb=True)
             # annotate with GT
             if args.visGT:
-                annotImg = visPreds(GTpath=args.path, img=annotImg, obb=True)
+                annotImg = visPreds(GTpath=args.path, img=annotImg, format=args.img_format, obb=True)
+
+            cv2.imshow('',annotImg)
+            cv2.waitKey()
+            cv2.destroyAllWindows()    
         
             # prediction statistics (validation)
             stats = True
@@ -370,12 +388,12 @@ def main():
             Total_Pred += total_preds                    
         elif args.visualizeGT:
             if args.obbGT:
-                annotImg = visGT(imgPath, obb=args.obbGT)
-                # cv2.imshow('',annotImg)
-                # cv2.waitKey()
-                # cv2.destroyAllWindows()
+                annotImg = visGT(imgPath, format=args.img_format, obb=args.obbGT)
+                cv2.imshow('',annotImg)
+                cv2.waitKey()
+                cv2.destroyAllWindows()
             else:
-                annotImg = visGT(imgPath, boxType=args.boxType)
+                annotImg = visGT(imgPath, format=args.img_format, boxType=args.boxType)
                 cv2.imshow('',annotImg)
                 cv2.waitKey()
                 cv2.destroyAllWindows()
