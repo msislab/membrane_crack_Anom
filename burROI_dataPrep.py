@@ -252,7 +252,7 @@ def main():
     _args = args()
     w,h   = 1920,1280
 
-    savePath = os.path.join(_args.savePath, 'Burr_dataset_gass_anomaly')
+    savePath = os.path.join(_args.savePath, 'Burr_dataset_demo_3')
     if not os.path.exists(savePath):
         os.makedirs(savePath, exist_ok=True)
 
