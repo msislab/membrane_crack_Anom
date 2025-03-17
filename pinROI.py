@@ -756,23 +756,23 @@ if __name__ == "__main__":
         pinPreds = pinPreds[sorted_indices]
         print(len(pinPreds))
 
-        # Pin image Preparation-----------------------
-        Pinmask = (Pinmask*255).astype(np.uint8)
-        patchedImg = model.patchify_2(Pin_img, mask=Pinmask, pinPreds=pinPreds, roi=pinROI_box, surface=surfaceName)
-        patches, patchPosz, patchmasks = patchedImg.get('patches'), patchedImg.get('patch_positions'), patchedImg.get('patch_masks')
+        # Pin image Preparation------------------------------------------------------------------------------------
+        # Pinmask = (Pinmask*255).astype(np.uint8)
+        # patchedImg = model.patchify_2(Pin_img, mask=Pinmask, pinPreds=pinPreds, roi=pinROI_box, surface=surfaceName)
+        # patches, patchPosz, patchmasks = patchedImg.get('patches'), patchedImg.get('patch_positions'), patchedImg.get('patch_masks')
 
-        # write patched images
-        for i, patch in enumerate(patches):
-            patchMask = patchmasks[i]
-            imgSavePath = os.path.join(savePath, 'images')
-            img_name    = os.path.join(imgSavePath, f'pinImg_{idx}.png')
-            maskSavePath = os.path.join(savePath, 'masks')
-            mask_name    = os.path.join(maskSavePath, f'pinImg_{idx}.png')
+        # # write patched images
+        # for i, patch in enumerate(patches):
+        #     patchMask = patchmasks[i]
+        #     imgSavePath = os.path.join(savePath, 'images')
+        #     img_name    = os.path.join(imgSavePath, f'pinImg_{idx}.png')
+        #     maskSavePath = os.path.join(savePath, 'masks')
+        #     mask_name    = os.path.join(maskSavePath, f'pinImg_{idx}.png')
 
-            idx += 1
+        #     idx += 1
 
-            cv2.imwrite(img_name, patch)
-            cv2.imwrite(mask_name, patchMask)
+        #     cv2.imwrite(img_name, patch)
+        #     cv2.imwrite(mask_name, patchMask)
         
         #-----------------------------------------------------------------------------------------------------------
         # Burr image preparation------------------------
@@ -819,3 +819,4 @@ if __name__ == "__main__":
 
             # cv2.imwrite(img_name, patch)
             # cv2.imwrite(mask_name, patchMask)
+    #-----------------------------------------------------------------------------------------------------------------------        
