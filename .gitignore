@@ -4,3 +4,6 @@ output/
 *.pt
 *.jpg
 *.png
+*.json
+
+*.pyc

@@ -10,13 +10,15 @@ import time
 import emoji
 from colorama import Fore, Style 
 from ultralytics import YOLO
+import json
 
 
 class MODEL:
     """
     m07_PinROI model class. This class is implimented to get the desired foreground ROIs (Pin-ROI, Bur-ROI) of Pin surfaces.
     """
-    def __init__(self, model_path='', confidence_threshold=0.25, 
+    def __init__(self, model_path='', confidence_threshold=0.25,
+                 brightnessConfig = '/home/gpuadmin/Desktop/WEIGHTS/08_Abrasion/brightness_config.json', 
                  height=1280, width=1920, warmup_runs=3, 
                  device_id=0):  #TODO 3: Update the model_path, Add the parameters you need which can be modified from GUI
         """
@@ -37,10 +39,8 @@ class MODEL:
         self.kernel  = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
         self._kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
 
-        self.brightness_adjustment_thres = {
-                                            "Front": [0.8,0.8,0.95, 1.3],
-                                            "Top": [0.8,0.8,0.95, 1.6]
-                                        }
+        with open(brightnessConfig, "r") as file:
+                self.BThres = json.load(file)
 
         self.model = YOLO(model_path)
  
@@ -248,7 +248,11 @@ class MODEL:
             patch[y:h-3, left_x:right_x] = 255
 
             # patch[y:height-1, left_x:right_x] = 255
-            patch = cv2.morphologyEx(patch, cv2.MORPH_ERODE, self.kernel, iterations=itrs)
+            patch = cv2.morphologyEx(patch, cv2.MORPH_DILATE, self.kernel, iterations=itrs)
+            if callfrom=='segment_pin':
+                patch = cv2.morphologyEx(patch, cv2.MORPH_ERODE, self.kernel, iterations=itrs+2)
+            elif callfrom=='segment_burr':
+                patch = cv2.morphologyEx(patch, cv2.MORPH_ERODE, self.kernel, iterations=itrs)
             contours, _ = cv2.findContours(patch, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             if len(contours)>0:
                 component_mask = np.zeros_like(patch)
@@ -333,43 +337,37 @@ class MODEL:
         _b = np.array(255*(b / 255) ** gamma, dtype = 'uint8')
         return np.dstack((_b, _g, _r))
 
-    def preProcess_patch(self, patch_img, surfaceName=''):
+    def preProcess_patch(self, patch_img, surfaceName='', patchIdx=0):
 
         if 'Front' in surfaceName:
-                scale_factor = self.brightness_adjustment_thres['Front']
+            bThres = self.BThres[surfaceName][f'{patchIdx}'] - 2
         elif 'Top' in surfaceName:
-            scale_factor = self.brightness_adjustment_thres['Top']
+            bThres = self.BThres[surfaceName][f'{patchIdx}'] - 1.2      
         
         _patch_img = cv2.cvtColor(patch_img, cv2.COLOR_BGR2HSV)
+        # print(surfaceName)
         h, s, v = cv2.split(_patch_img)
 
-        v_gamma = np.array(255*(v / 255) ** scale_factor[-1], dtype = 'uint8')
-        # v_gamma_th = np.clip(scale_factor[0]*v_gamma, 0, 255).astype(np.uint8)
+        brightness = np.sum(v)/(v.shape[0]*v.shape[1])
+
+        diff = brightness - bThres
+
+        if diff>0:
+            scale_factor = 1 + (diff/25)
+            if scale_factor > 1.7:
+                # TODO: give warning of too much higher brightness
+                scale_factor = 1.7
+                v = np.clip(v * 0.9, 0, 255).astype(np.uint8)
+        
+            v = np.array(255*(v / 255) ** scale_factor, dtype = 'uint8')
+        
         h = np.mod(h * 1.15, 180).astype(np.uint8)
         s = np.clip(s * 1.5, 0, 255).astype(np.uint8)
         
-        patch_img = cv2.merge([h,s,v_gamma])
+        patch_img = cv2.merge([h,s,v])
         patch_img = cv2.cvtColor(patch_img, cv2.COLOR_HSV2BGR)
 
-        # b, g, r = patch_img[:,:,0], patch_img[:,:,1], patch_img[:,:,2]
-
-        # b = np.array(255*(b / 255) ** scale_factor[-1])
-        # g = np.array(255*(g / 255) ** scale_factor[-1])
-        # r = np.array(255*(r / 255) ** scale_factor[-1])
-        
-        # b = np.clip(scale_factor[0]*b, 0, 255).astype(np.uint8)
-        # g = np.clip(scale_factor[1]*g, 0, 255).astype(np.uint8)
-        # r = np.clip(1.3*r, 0, 255).astype(np.uint8)
-
-        # patch_img = cv2.merge([b,g,r])
-
-        # cv2.imshow('', patch_img)
-        # cv2.waitKey()
-        # cv2.destroyAllWindows()
-
-        # patch_img[:,:,0] = b
-        # patch_img[:,:,1] = g
-        # patch_img[:,:,2] = r
+        patch_img[:,:,2] = np.clip(patch_img[:,:,2]*1.25, 0, 255).astype(np.uint8)
 
         # patch = cv2.convertScaleAbs(patch_img, alpha=alpha, beta=beta)
 
@@ -730,7 +728,8 @@ if __name__ == "__main__":
     
     args = arguments()
     # Load the model
-    model = MODEL(model_path=args.roiModel, confidence_threshold=0.2, warmup_runs=3)
+    model = MODEL(model_path=args.roiModel, confidence_threshold=0.2, warmup_runs=3,
+                  brightnessConfig='/home/zafar/old_pc/data_sets/robot-project-datasets/code-integration/brightness_config.json')
 
     dataPath = args.dataPath
     savePath = args.savePath
@@ -757,22 +756,22 @@ if __name__ == "__main__":
         print(len(pinPreds))
 
         # Pin image Preparation------------------------------------------------------------------------------------
-        # Pinmask = (Pinmask*255).astype(np.uint8)
-        # patchedImg = model.patchify_2(Pin_img, mask=Pinmask, pinPreds=pinPreds, roi=pinROI_box, surface=surfaceName)
-        # patches, patchPosz, patchmasks = patchedImg.get('patches'), patchedImg.get('patch_positions'), patchedImg.get('patch_masks')
+        Pinmask = (Pinmask*255).astype(np.uint8)
+        patchedImg = model.patchify_2(Pin_img, mask=Pinmask, pinPreds=pinPreds, roi=pinROI_box, surface=surfaceName)
+        patches, patchPosz, patchmasks = patchedImg.get('patches'), patchedImg.get('patch_positions'), patchedImg.get('patch_masks')
 
-        # # write patched images
-        # for i, patch in enumerate(patches):
-        #     patchMask = patchmasks[i]
-        #     imgSavePath = os.path.join(savePath, 'images')
-        #     img_name    = os.path.join(imgSavePath, f'pinImg_{idx}.png')
-        #     maskSavePath = os.path.join(savePath, 'masks')
-        #     mask_name    = os.path.join(maskSavePath, f'pinImg_{idx}.png')
+        # write patched images
+        for i, patch in enumerate(patches):
+            patchMask = patchmasks[i]
+            imgSavePath = os.path.join(savePath, 'images')
+            img_name    = os.path.join(imgSavePath, f'pinImg_{idx}.png')
+            maskSavePath = os.path.join(savePath, 'masks')
+            mask_name    = os.path.join(maskSavePath, f'pinImg_{idx}.png')
 
-        #     idx += 1
+            idx += 1
 
-        #     cv2.imwrite(img_name, patch)
-        #     cv2.imwrite(mask_name, patchMask)
+            cv2.imwrite(img_name, patch)
+            cv2.imwrite(mask_name, patchMask)
         
         #-----------------------------------------------------------------------------------------------------------
         # Burr image preparation------------------------
