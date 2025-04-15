@@ -741,9 +741,17 @@ if __name__ == "__main__":
     # Load an image
     for imagePath in tqdm.tqdm(imgPaths):
         print(imagePath)
-        # imagePath   = "/home/zafar/old_pc/data_sets/robot-project-datasets/pin_anomaly_data/new_data_factory_bldng/lineB_3_12/Front-pin_auto_1/Input-Front-pin_auto_1__Cam-Front__Camera-FNO-228__ProductID-12__.png"
+        # imagePath   = "/home/zafar/old_pc/data_sets/robot-project-datasets/code-integration/AIRobot/LinA_latest/Front-pin_auto_0/Input-Front-pin_auto_0__Cam-Front__Camera-FNO-33__ProductID-2__.png"
         imagePath   = imagePath.strip()
-        surfaceName = imagePath.split('Input-')[1].split('__Cam')[0]
+        try:
+            surfaceName = imagePath.split(f'/LineB_')[1].split('.png')[0].rsplit('-', 1)[0]
+        except:
+            surfaceName = imagePath.split(f'/LineA_')[1].split('.png')[0].rsplit('-', 1)[0]
+        # surfaceName = imagePath.split('Input-')[1].split('__Cam')[0]
+        # surfaceName = imagePath.split('/')[-1].split('.png')[0].rsplit('-', 1)[0]
+        # surfaceName  = '_'.join(imagePath.split('/')[-1].split('.png')[0].split('_')[1:])
+        # surfaceName  = '_'.join(imagePath.split('/')[-1].split('.webp')[0].split('_')[1:])
+        # surfaceName  = imagePath.split('/')[-1].split('.webp')[0].split('-', 1)[1]
         info={'Input':surfaceName}
         image = cv2.imread(imagePath)
 
@@ -798,9 +806,9 @@ if __name__ == "__main__":
         # _burImg_filterd_th_gamma = cv2.merge([h, s, v_gamma_bright])
         # _burImg_filterd_th_gamma = cv2.cvtColor(_burImg_filterd_th_gamma, cv2.COLOR_HSV2BGR)
 
-        # cv2.imshow('',_burImg_filterd_th_gamma)
-        # cv2.waitKey()
-        # cv2.destroyAllWindows()
+        # # cv2.imshow('',_burImg_filterd_th_gamma)
+        # # cv2.waitKey()
+        # # cv2.destroyAllWindows()
         
         # # patchify
         # patchedImg = model.patchify_1(_burImg_filterd_th_gamma, mask=Burmask, pinPreds=pinPreds, roi=burROI_box)
@@ -816,6 +824,6 @@ if __name__ == "__main__":
 
         #     idx += 1
 
-            # cv2.imwrite(img_name, patch)
-            # cv2.imwrite(mask_name, patchMask)
+        #     cv2.imwrite(img_name, patch)
+        #     cv2.imwrite(mask_name, patchMask)
     #-----------------------------------------------------------------------------------------------------------------------        
