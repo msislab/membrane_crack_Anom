@@ -190,80 +190,299 @@ class MODEL:
             pin1[:,[2,4]] = pin1[:,[2,4]] + adjustment
         return pin1    
 
+    def processFront_patch(self, patch, h, itrs=1):
+        
+        patch[:, :11]  = 0
+        patch[:, -11:] = 0
+
+        patch[0:70, :] = 0
+        try:
+            x_coords = np.where(patch[100, :] > 0)[0]
+            left_x = np.min(x_coords)
+            right_x = np.max(x_coords)
+            patch[3:72, left_x:right_x] = 255
+        except:
+            x_coords = np.where(patch[200, :] > 0)[0]
+            left_x = np.min(x_coords)
+            right_x = np.max(x_coords)
+            patch[3:200, left_x-2:right_x+2] = 255    
+
+        patch[-50:, :] = 0
+        try:
+            x_coords = np.where(patch[-55, :] > 0)[0]
+            left_x   = np.min(x_coords)
+            right_x = np.max(x_coords)
+            patch[-80:h-10, left_x+2:right_x-3] = 255
+        except:
+            x_coords = np.where(patch[-250, :] > 0)[0]
+            left_x   = np.min(x_coords)
+            right_x = np.max(x_coords)    
+            patch[-250:h-50, left_x+2:right_x-3] = 255
+            patch[h-50:h-10, left_x+5:right_x-5] = 255
+        
+        patch = cv2.morphologyEx(patch, cv2.MORPH_CLOSE, self.kernel, iterations=itrs)
+        patch = cv2.morphologyEx(patch, cv2.MORPH_OPEN, self._kernel, iterations=itrs)
+
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(patch, connectivity=4)
+        
+        if num_labels>0:
+            for i in range(1, num_labels):  # Skip background (label 0)
+                if stats[i, cv2.CC_STAT_AREA] < 2000:
+                    patch[labels == i] = 0
+        
+        contours, _ = cv2.findContours(patch, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+
+        # Fill all contours
+        filled = np.zeros_like(patch)
+        for i in range(len(contours)):
+            # Fill all contours regardless of hierarchy
+            cv2.drawContours(filled, contours, i, 255, thickness=cv2.FILLED)
+
+        y = int(0.5 * h)
+        x_coords = np.where(filled[y, :] > 0)[0]
+
+        left_x = np.min(x_coords) + 2
+        right_x = np.max(x_coords) - 2
+        filled[y:h-70, left_x:right_x] = 255
+        return filled
+    
+    def processTop_patch(self, patch, itrs=1):
+        
+        patch[:, :11]  = 0
+        patch[:, -11:] = 0
+        
+        patch = cv2.morphologyEx(patch, cv2.MORPH_CLOSE, self.kernel, iterations=itrs)
+        patch = cv2.morphologyEx(patch, cv2.MORPH_OPEN, self._kernel, iterations=itrs+1)
+
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(patch, connectivity=4)
+        
+        if num_labels>0:
+            for i in range(1, num_labels):  # Skip background (label 0)
+                if stats[i, cv2.CC_STAT_AREA] < 2000:
+                    patch[labels == i] = 0
+        
+        contours, _ = cv2.findContours(patch, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+
+        # Fill all contours
+        filled = np.zeros_like(patch)
+        for i in range(len(contours)):
+            # Fill all contours regardless of hierarchy
+            cv2.drawContours(filled, contours, i, 255, thickness=cv2.FILLED)
+        return filled
+    
     def generateMask(self, img, obbBoxes, itrs=1, callfrom=''):
-        # s = time.time()
-        height, width = img.shape[:2]
-        mask = np.zeros((height, width), dtype=bool)
+        # # s = time.time()
+        # height, width = img.shape[:2]
+        # mask = np.zeros((height, width), dtype=bool)
 
-        for box in obbBoxes:
-            if callfrom=='segment_pin':
-                x1, y1 = max(0, int(box[6])-3), max(0, int(box[7]))
-                x2, y2 = min(width, int(box[2]+3)), min(height, int(box[3]))
-            elif callfrom=='segment_burr':
-                x1, y1 = max(0, int(box[6])-1), max(0, int(box[7]))
-                x2, y2 = min(width, int(box[2])+1), min(height, int(box[3]))   
+        # for box in obbBoxes:
+        #     if callfrom=='segment_pin':
+        #         x1, y1 = max(0, int(box[6])-3), max(0, int(box[7]))
+        #         x2, y2 = min(width, int(box[2]+3)), min(height, int(box[3]))
+        #     elif callfrom=='segment_burr':
+        #         x1, y1 = max(0, int(box[6])-1), max(0, int(box[7]))
+        #         x2, y2 = min(width, int(box[2])+1), min(height, int(box[3]))   
             
-            patch = img[y1:y2,x1:x2]    
-            patch = cv2.threshold(cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY), 30, 255, cv2.THRESH_BINARY)[1]
-            # patch = cv2.morphologyEx(patch, cv2.MORPH_DILATE, self.kernel, iterations=1)
+        #     patch = img[y1:y2,x1:x2]    
+        #     patch = cv2.threshold(cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY), 30, 255, cv2.THRESH_BINARY)[1]
+        #     # patch = cv2.morphologyEx(patch, cv2.MORPH_DILATE, self.kernel, iterations=1)
 
-            h, w  = patch.shape
+        #     h, w  = patch.shape
 
-            num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(patch, connectivity=4)
+        #     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(patch, connectivity=4)
 
-            # post process to remove very small connected components and extending bigger components from top and bottom if necessary
-            if num_labels>0:
-                for i in range(1, num_labels):  # Skip background (label 0)
-                    if stats[i, cv2.CC_STAT_AREA] < 1000:
-                        continue
-                    else:
-                        x, y, _w, _h, area = stats[i]
-                        _x1 = int(x+3)
-                        _x2 = int(x+_w-7)
-                        _y1 = int(y)
-                        # _y2 = int(y+_h)
-                        # if _y1>5:
-                        #     _y1 = 2   
-                        #     # y1 = 5
-                        # if _y2<((h/2)+10):
-                        _y2 = h-3
+        #     # post process to remove very small connected components and extending bigger components from top and bottom if necessary
+        #     if num_labels>0:
+        #         for i in range(1, num_labels):  # Skip background (label 0)
+        #             if stats[i, cv2.CC_STAT_AREA] < 1000:
+        #                 continue
+        #             else:
+        #                 x, y, _w, _h, area = stats[i]
+        #                 _x1 = int(x+3)
+        #                 _x2 = int(x+_w-7)
+        #                 _y1 = int(y)
+        #                 # _y2 = int(y+_h)
+        #                 # if _y1>5:
+        #                 #     _y1 = 2   
+        #                 #     # y1 = 5
+        #                 # if _y2<((h/2)+10):
+        #                 _y2 = h-3
                         
-                        patch[_y1:_y2, _x1:_x2] = 255    
+        #                 patch[_y1:_y2, _x1:_x2] = 255    
 
-            # # post processing for patch top
-            # y = int(0.3 * h)
-            # x_coords = np.where(patch[y, :] > 0)[0]
+        #     # # post processing for patch top
+        #     # y = int(0.3 * h)
+        #     # x_coords = np.where(patch[y, :] > 0)[0]
 
-            # left_x = np.min(x_coords) + 1 if x_coords.size > 0 else 3
-            # right_x = np.max(x_coords) - 1 if x_coords.size > 0 else w - 3    
+        #     # left_x = np.min(x_coords) + 1 if x_coords.size > 0 else 3
+        #     # right_x = np.max(x_coords) - 1 if x_coords.size > 0 else w - 3    
 
-            # patch[0:y, left_x:right_x] = 255
+        #     # patch[0:y, left_x:right_x] = 255
 
-            # # post processing for patch Bottom
-            y = int(0.7 * h)
-            x_coords = np.where(patch[y, :] > 0)[0]
+        #     # # post processing for patch Bottom
+        #     y = int(0.7 * h)
+        #     x_coords = np.where(patch[y, :] > 0)[0]
 
-            left_x = np.min(x_coords) + 2 if x_coords.size > 0 else _x1 + 2
-            right_x = np.max(x_coords) - 2 if x_coords.size > 0 else _x2 + 6
-            patch[y:h-3, left_x:right_x] = 255
+        #     left_x = np.min(x_coords) + 2 if x_coords.size > 0 else _x1 + 2
+        #     right_x = np.max(x_coords) - 2 if x_coords.size > 0 else _x2 + 6
+        #     patch[y:h-3, left_x:right_x] = 255
 
-            # patch[y:height-1, left_x:right_x] = 255
-            patch = cv2.morphologyEx(patch, cv2.MORPH_DILATE, self.kernel, iterations=itrs)
-            if callfrom=='segment_pin':
-                patch = cv2.morphologyEx(patch, cv2.MORPH_ERODE, self.kernel, iterations=itrs+2)
-            elif callfrom=='segment_burr':
-                patch = cv2.morphologyEx(patch, cv2.MORPH_ERODE, self.kernel, iterations=itrs)
-            contours, _ = cv2.findContours(patch, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            if len(contours)>0:
-                component_mask = np.zeros_like(patch)
-                cv2.drawContours(component_mask, contours, -1, 255, thickness=cv2.FILLED)
-                patch[component_mask == 255] = 255
-            # patch = cv2.erode(patch, self._kernel, iterations=1)
+        #     # patch[y:height-1, left_x:right_x] = 255
+        #     patch = cv2.morphologyEx(patch, cv2.MORPH_DILATE, self.kernel, iterations=itrs)
+        #     if callfrom=='segment_pin':
+        #         patch = cv2.morphologyEx(patch, cv2.MORPH_ERODE, self.kernel, iterations=itrs+2)
+        #     elif callfrom=='segment_burr':
+        #         patch = cv2.morphologyEx(patch, cv2.MORPH_ERODE, self.kernel, iterations=itrs)
+        #     contours, _ = cv2.findContours(patch, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        #     if len(contours)>0:
+        #         component_mask = np.zeros_like(patch)
+        #         cv2.drawContours(component_mask, contours, -1, 255, thickness=cv2.FILLED)
+        #         patch[component_mask == 255] = 255
+        #     # patch = cv2.erode(patch, self._kernel, iterations=1)
             
-            mask[y1:y2, x1:x2] = patch>0
+        #     mask[y1:y2, x1:x2] = patch>0
 
-        # print('Generate mask method time: ', time.time()-s)
-        return mask
+        # # print('Generate mask method time: ', time.time()-s)
+        # return mask
+        # s = time.time()
+            height, width = img.shape[:2]
+            mask = np.zeros((height, width), dtype=bool)
+
+            for box in obbBoxes:
+                if callfrom=='segment_pin':
+                    x1, y1 = max(0, int(box[6])-10), max(0, int(box[7]))
+                    x2, y2 = min(width, int(box[2])+10), min(height, int(box[3]))
+                    # elif callfrom=='segment_burr':
+                    #     x1, y1 = max(0, int(box[6])), max(0, int(box[7]))
+                    #     x2, y2 = min(width, int(box[2])), min(height, int(box[3]))
+
+                    patch = img[y1:y2,x1:x2]
+                    #TODO: Expose the patch with brightness preprocessing
+                    patch = cv2.threshold(cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY), 35, 255, cv2.THRESH_BINARY)[1]
+                    h, w  = patch.shape  
+                        
+                    if 'Front' in self.surface:
+                        filled = self.processFront_patch(patch, h, itrs=itrs)
+                        patch = cv2.morphologyEx(filled, cv2.MORPH_DILATE, self._kernel, iterations=itrs)
+                        patch = cv2.morphologyEx(patch, cv2.MORPH_ERODE, self._kernel, iterations=itrs+1)
+
+                        contours, _ = cv2.findContours(patch, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                        smoothed_mask = np.zeros_like(patch)
+
+                        for cnt in contours:
+                            if cv2.contourArea(cnt) < 1000:
+                                continue
+                            approx = cv2.approxPolyDP(cnt, epsilon=2.5, closed=True)
+                            cv2.drawContours(smoothed_mask, [approx], -1, 255, thickness=cv2.FILLED)
+                        
+                        x_coords = np.where(smoothed_mask[120, :] > 0)[0]
+
+                        left_x = np.min(x_coords) - 5
+                        right_x = np.max(x_coords) + 5
+                        smoothed_mask[130:, right_x:] = 0
+                        smoothed_mask[130:, :left_x]  = 0
+
+                        smoothed_mask[0:100, right_x+5:] = 0
+                        smoothed_mask[0:100, :left_x-5]  = 0
+                    elif 'Top' in self.surface:
+                        # patch = cv2.morphologyEx(filled, cv2.MORPH_DILATE, self._kernel, iterations=itrs
+                        filled = self.processTop_patch(patch, itrs=itrs)
+                        patch = cv2.morphologyEx(filled, cv2.MORPH_ERODE, self._kernel, iterations=itrs+1)
+
+                        contours, _ = cv2.findContours(patch, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                        smoothed_mask = np.zeros_like(patch)
+
+                        for cnt in contours:
+                            if cv2.contourArea(cnt) < 1000:
+                                continue
+                            approx = cv2.approxPolyDP(cnt, epsilon=1.2, closed=True)
+                            cv2.drawContours(smoothed_mask, [approx], -1, 255, thickness=cv2.FILLED)
+                        # smoothed_mask = cv2.morphologyEx(smoothed_mask, cv2.MORPH_ERODE, self._kernel, iterations=itrs)
+                        x_coords = np.where(smoothed_mask[h-60, :] > 0)[0]
+
+                        left_x = np.min(x_coords) - 5
+                        right_x = np.max(x_coords) + 3
+                        smoothed_mask[0:h-60, right_x:] = 0
+                        smoothed_mask[0:h-60, :left_x]  = 0
+
+                        patch = cv2.morphologyEx(smoothed_mask, cv2.MORPH_DILATE, self._kernel, iterations=itrs)   
+
+                elif callfrom=='segment_burr':
+                    x1, y1 = max(0, int(box[6]-5)), max(0, int(box[7]))
+                    x2, y2 = min(width, int(box[2]+5)), min(height, int(box[3]))
+                    
+                    patch = img[y1:y2,x1:x2]
+                    patch = cv2.threshold(cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY), 30, 255, cv2.THRESH_BINARY)[1]
+                    # patch = cv2.morphologyEx(patch, cv2.MORPH_DILATE, self.kernel, iterations=1)
+
+                    h, w  = patch.shape
+
+                    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(patch, connectivity=4)
+
+                    # post process to remove very small connected components and extending bigger components from top and bottom if necessary
+                    if num_labels>0:
+                        for i in range(1, num_labels):  # Skip background (label 0)
+                            if stats[i, cv2.CC_STAT_AREA] < 1000:
+                                continue
+                            x, y, _w, _h, area = stats[i]
+                            _x1 = int(x+3)
+                            _x2 = int(x+_w-3)
+                            _y1 = int(y)
+                            # _y2 = int(y+_h)
+                            # if _y1>5:
+                            #     _y1 = 2   
+                            #     # y1 = 5
+                            # if _y2<((h/2)+10):
+                            _y2 = h-3
+                            
+                            patch[_y1:_y2, _x1:_x2] = 255    
+
+                    # # post processing for patch top
+                    # y = int(0.3 * h)
+                    # x_coords = np.where(patch[y, :] > 0)[0]
+
+                    # left_x = np.min(x_coords) + 1 if x_coords.size > 0 else 3
+                    # right_x = np.max(x_coords) - 1 if x_coords.size > 0 else w - 3    
+
+                    # patch[0:y, left_x:right_x] = 255
+
+                    # # post processing for patch Bottom
+                    y = int(0.7 * h)
+                    x_coords = np.where(patch[y, :] > 0)[0]
+
+                    left_x = np.min(x_coords) if x_coords.size > 0 else _x1 + 2
+                    right_x = np.max(x_coords) if x_coords.size > 0 else _x2 -2
+                    patch[y:h-3, left_x:right_x] = 255
+
+                    # patch[y:height-1, left_x:right_x] = 255
+                    # patch = cv2.morphologyEx(patch, cv2.MORPH_DILATE, self._kernel, iterations=itrs)
+                    patch[[0,-1],:] = 0
+                    patch[:,[0,-1]] = 0
+                    # patch = cv2.morphologyEx(patch, cv2.MORPH_ERODE, self._kernel, iterations=itrs)    
+                    # contours, _ = cv2.findContours(patch, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    # if len(contours)>0:
+                    #     component_mask = np.zeros_like(patch)
+                    #     cv2.drawContours(component_mask, contours, -1, 255, thickness=cv2.FILLED)
+                    #     patch[component_mask == 255] = 255    
+                    # patch = cv2.morphologyEx(patch, cv2.MORPH_DILATE, self._kernel, iterations=itrs)
+                    contours, _ = cv2.findContours(patch, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    smoothed_mask = np.zeros_like(patch)
+
+                    for cnt in contours:
+                        if cv2.contourArea(cnt) < 1000:
+                            continue
+                        approx = cv2.approxPolyDP(cnt, epsilon=1.2, closed=True)
+                        cv2.drawContours(smoothed_mask, [approx], -1, 255, thickness=cv2.FILLED)
+                    if 'Top' in self.surface:
+                        patch = cv2.morphologyEx(smoothed_mask, cv2.MORPH_ERODE, self._kernel, iterations=itrs)
+                    elif 'Front' in self.surface:
+                        patch = cv2.morphologyEx(smoothed_mask, cv2.MORPH_ERODE, self._kernel, iterations=itrs+1)
+                        #    
+                    # patch = cv2.morphologyEx(smoothed_mask, cv2.MORPH_ERODE, self._kernel, iterations=itrs)
+                    # patch = smoothed_mask    
+                mask[y1:y2, x1:x2] = patch>0
+            # print('Generate mask method time: ', time.time()-s)
+            return mask
     
     def segment(self, img, obbBoxes, roi='Pin'):
 
@@ -652,6 +871,7 @@ class MODEL:
         img = cv2.resize(np.copy(image), (self.w, self.h), interpolation=cv2.INTER_AREA)
 
         realName = info['Input']
+        self.surface = realName
         # print(realName)
 
         # _s = time.time()
@@ -743,87 +963,87 @@ if __name__ == "__main__":
         print(imagePath)
         # imagePath   = "/home/zafar/old_pc/data_sets/robot-project-datasets/code-integration/AIRobot/LinA_latest/Front-pin_auto_0/Input-Front-pin_auto_0__Cam-Front__Camera-FNO-33__ProductID-2__.png"
         imagePath   = imagePath.strip()
-        try:
-            surfaceName = imagePath.split(f'/LineB_')[1].split('.png')[0].rsplit('-', 1)[0]
-        except:
-            surfaceName = imagePath.split(f'/LineA_')[1].split('.png')[0].rsplit('-', 1)[0]
+        # try:
+        #     surfaceName = imagePath.split(f'/LineB_')[1].split('.png')[0].rsplit('-', 1)[0]
+        # except:
+        #     surfaceName = imagePath.split(f'/LineA_')[1].split('.png')[0].rsplit('-', 1)[0]
         # surfaceName = imagePath.split('Input-')[1].split('__Cam')[0]
         # surfaceName = imagePath.split('/')[-1].split('.png')[0].rsplit('-', 1)[0]
         # surfaceName  = '_'.join(imagePath.split('/')[-1].split('.png')[0].split('_')[1:])
         # surfaceName  = '_'.join(imagePath.split('/')[-1].split('.webp')[0].split('_')[1:])
         # surfaceName  = imagePath.split('/')[-1].split('.webp')[0].split('-', 1)[1]
+        surfaceName = imagePath.split('/')[-2]
         info={'Input':surfaceName}
         image = cv2.imread(imagePath)
 
         # Run inference
         Pin_img, pinROI_box, Pinmask, burImg, burROI_box, Burmask, pinPreds = model.process(image, info=info)
-
         
         sorted_indices = np.argsort(pinPreds[:, 6])
         pinPreds = pinPreds[sorted_indices]
         print(len(pinPreds))
 
         # Pin image Preparation------------------------------------------------------------------------------------
-        Pinmask = (Pinmask*255).astype(np.uint8)
-        patchedImg = model.patchify_2(Pin_img, mask=Pinmask, pinPreds=pinPreds, roi=pinROI_box, surface=surfaceName)
-        patches, patchPosz, patchmasks = patchedImg.get('patches'), patchedImg.get('patch_positions'), patchedImg.get('patch_masks')
-
-        # write patched images
-        for i, patch in enumerate(patches):
-            patchMask = patchmasks[i]
-            imgSavePath = os.path.join(savePath, 'images')
-            img_name    = os.path.join(imgSavePath, f'pinImg_{idx}.png')
-            maskSavePath = os.path.join(savePath, 'masks')
-            mask_name    = os.path.join(maskSavePath, f'pinImg_{idx}.png')
-
-            idx += 1
-
-            cv2.imwrite(img_name, patch)
-            cv2.imwrite(mask_name, patchMask)
-        
-        #-----------------------------------------------------------------------------------------------------------
-        # Burr image preparation------------------------
-
-        # adjust roi to igonre black coated region
-        # if 'Front' in imagePath:
-        #     burROI_box[1] += 10
-        #     burROI_box[3] -= 150
-        # elif 'Top' in imagePath:
-        #     burROI_box[1] += 5
-        #     burROI_box[3] -= 10
-
-        # Burmask = (Burmask*255).astype(np.uint8)    
-
-        # # preprocess brr roi image
-        # _burImg = cv2.cvtColor(burImg, cv2.COLOR_BGR2HSV)
-        # h, s, v = cv2.split(_burImg)
-        # if 'Top' in imagePath:
-        #     v_gamma = np.clip(255*(v/255)**0.5, 0, 255)
-        # elif 'Front' in imagePath:
-        #     v_gamma = np.clip(255*(v/255)**0.4, 0, 255)        
-        # v_gamma_bright = np.clip(v_gamma*1.5, 0, 255).astype(np.uint8)
-        # v_gamma_bright[v_gamma_bright<20] = 0
-        # _burImg_filterd_th_gamma = cv2.merge([h, s, v_gamma_bright])
-        # _burImg_filterd_th_gamma = cv2.cvtColor(_burImg_filterd_th_gamma, cv2.COLOR_HSV2BGR)
-
-        # # cv2.imshow('',_burImg_filterd_th_gamma)
-        # # cv2.waitKey()
-        # # cv2.destroyAllWindows()
-        
-        # # patchify
-        # patchedImg = model.patchify_1(_burImg_filterd_th_gamma, mask=Burmask, pinPreds=pinPreds, roi=burROI_box)
+        # Pinmask = (Pinmask*255).astype(np.uint8)
+        # patchedImg = model.patchify_2(Pin_img, mask=Pinmask, pinPreds=pinPreds, roi=pinROI_box, surface=surfaceName)
         # patches, patchPosz, patchmasks = patchedImg.get('patches'), patchedImg.get('patch_positions'), patchedImg.get('patch_masks')
 
         # # write patched images
         # for i, patch in enumerate(patches):
         #     patchMask = patchmasks[i]
         #     imgSavePath = os.path.join(savePath, 'images')
-        #     img_name    = os.path.join(imgSavePath, f'burImg_{idx}.png')
+        #     img_name    = os.path.join(imgSavePath, f'pinImg_{idx}.png')
         #     maskSavePath = os.path.join(savePath, 'masks')
-        #     mask_name    = os.path.join(maskSavePath, f'burImg_{idx}.png')
+        #     mask_name    = os.path.join(maskSavePath, f'pinImg_{idx}.png')
 
         #     idx += 1
 
         #     cv2.imwrite(img_name, patch)
         #     cv2.imwrite(mask_name, patchMask)
+        
+        #-----------------------------------------------------------------------------------------------------------
+        # Burr image preparation------------------------
+
+        # adjust roi to igonre black coated region
+        if 'Front' in imagePath:
+            burROI_box[1] += 10
+            burROI_box[3] -= 150
+        elif 'Top' in imagePath:
+            burROI_box[1] += 5
+            burROI_box[3] -= 10
+
+        Burmask = (Burmask*255).astype(np.uint8)    
+
+        # preprocess brr roi image
+        _burImg = cv2.cvtColor(burImg, cv2.COLOR_BGR2HSV)
+        h, s, v = cv2.split(_burImg)
+        if 'Top' in imagePath:
+            v_gamma = np.clip(255*(v/255)**0.5, 0, 255)
+        elif 'Front' in imagePath:
+            v_gamma = np.clip(255*(v/255)**0.4, 0, 255)        
+        v_gamma_bright = np.clip(v_gamma*1.5, 0, 255).astype(np.uint8)
+        v_gamma_bright[v_gamma_bright<20] = 0
+        _burImg_filterd_th_gamma = cv2.merge([h, s, v_gamma_bright])
+        _burImg_filterd_th_gamma = cv2.cvtColor(_burImg_filterd_th_gamma, cv2.COLOR_HSV2BGR)
+
+        # cv2.imshow('',_burImg_filterd_th_gamma)
+        # cv2.waitKey()
+        # cv2.destroyAllWindows()
+        
+        # patchify
+        patchedImg = model.patchify_1(_burImg_filterd_th_gamma, mask=Burmask, pinPreds=pinPreds, roi=burROI_box)
+        patches, patchPosz, patchmasks = patchedImg.get('patches'), patchedImg.get('patch_positions'), patchedImg.get('patch_masks')
+
+        # write patched images
+        for i, patch in enumerate(patches):
+            patchMask = patchmasks[i]
+            imgSavePath = os.path.join(savePath, 'images')
+            img_name    = os.path.join(imgSavePath, f'burImg_{idx}.png')
+            maskSavePath = os.path.join(savePath, 'masks')
+            mask_name    = os.path.join(maskSavePath, f'burImg_{idx}.png')
+
+            idx += 1
+
+            cv2.imwrite(img_name, patch)
+            # cv2.imwrite(mask_name, patchMask)
     #-----------------------------------------------------------------------------------------------------------------------        
