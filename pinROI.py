@@ -48,6 +48,56 @@ class MODEL:
         for _ in range(warmup_runs):
             _ = self.model.predict(source=dummy_image, conf=self.conf_thres, device=self.device, verbose=False)
 
+    def drawBox(self, img, boxes, obb=False, boxType='xywh', color=(0,255,0), thickness=1, adj=0, label=False):
+        if obb:
+            # print('visualizing obb preds')
+            for box in boxes:
+                _box = np.array([[int(box[0])-adj, int(box[1])-adj],
+                                [int(box[2])+adj, int(box[3])-adj],
+                                [int(box[4])+adj, int(box[5])+adj],
+                                [int(box[6])-adj, int(box[7])+adj]])
+                _box = _box.reshape(-1,1,2)
+                cv2.polylines(img, [_box], isClosed=True, color=color, thickness=thickness)
+                # text = f"{box[0]};{box[-1]}"
+                # (w, h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.75, thickness+1)
+                # label_bg_top_left = (int(box[1]), int(box[2]) - h - 5)
+                # label_bg_bottom_right = (int(box[1]) + w, int(box[2]))
+                # cv2.rectangle(img, label_bg_top_left, label_bg_bottom_right, color, -1)
+                # cv2.putText(img, text, (box[1]), (int(box[2]) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), thickness+1)
+        else:
+            if boxType=='xywh':
+                for box in boxes:
+                    x1 = int(box[1] - box[3]/2)
+                    x2 = int(box[1] + box[3]/2)
+                    y1 = int(box[2] - box[4]/2)
+                    y2 = int(box[2] + box[4]/2)
+
+                    cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness)
+                    # text = f'{box[0]}:'
+                    # (w, h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.75, thickness+1)
+                    # label_bg_top_left = (x1, y1 - h - 5)
+                    # label_bg_bottom_right = (x1 + w, y1)
+                    # cv2.rectangle(img, label_bg_top_left, label_bg_bottom_right, color, -1)
+                    # cv2.putText(img, text, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), thickness+1)
+
+            elif boxType=='xyxy':   # TODO: implement the box rendering for xyxy box coordinates
+                for i, box in enumerate(boxes):
+                    x1 = int(box[0])
+                    x2 = int(box[2])
+                    y1 = int(box[1])
+                    y2 = int(box[3])
+
+                    cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness)
+                    if label:
+                        cv2.putText(img, f'{i+1}', (x1+2, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color=color, thickness=thickness)
+
+                    # text = f'{box[0]}:'
+                    # (w, h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.75, thickness+1)
+                    # label_bg_top_left = (x1, y1 - h - 5)
+                    # label_bg_bottom_right = (x1 + w, y1)
+                    # cv2.rectangle(img, label_bg_top_left, label_bg_bottom_right, color, -1)
+                    # cv2.putText(img, text, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), thickness+1)
+    
     def processOBB(self, yoloOBB_rslt, conf_thres):
         # s = time.time()
         preds_list = []
@@ -375,15 +425,17 @@ class MODEL:
                             approx = cv2.approxPolyDP(cnt, epsilon=2.5, closed=True)
                             cv2.drawContours(smoothed_mask, [approx], -1, 255, thickness=cv2.FILLED)
                         
+                        
+                        # ind = np.where(np.any(smoothed_mask[:130, :] > 0, axis=1))[0]
                         x_coords = np.where(smoothed_mask[120, :] > 0)[0]
 
                         left_x = np.min(x_coords) - 5
                         right_x = np.max(x_coords) + 5
-                        smoothed_mask[130:, right_x:] = 0
-                        smoothed_mask[130:, :left_x]  = 0
+                        smoothed_mask[120:, right_x:] = 0
+                        smoothed_mask[120:, :left_x]  = 0
 
-                        smoothed_mask[0:100, right_x+5:] = 0
-                        smoothed_mask[0:100, :left_x-5]  = 0
+                        smoothed_mask[0:120, right_x+5:] = 0
+                        smoothed_mask[0:120, :left_x-5]  = 0
                     elif 'Top' in self.surface:
                         # patch = cv2.morphologyEx(filled, cv2.MORPH_DILATE, self._kernel, iterations=itrs
                         filled = self.processTop_patch(patch, itrs=itrs)
@@ -918,9 +970,10 @@ class MODEL:
             # cv2.imwrite('img.jpg', _img)
 
             # _s = time.time()
-            Pin_img, pinROI_box, Pinmask = self.pinROI(img=img, pin1=pin1)
+            # Pin_img, pinROI_box, Pinmask = self.pinROI(img=img, pin1=pin1)
             burImg, burROI_box, Burmask  = self.burrROI(img=img, pin=pin1)
-            return Pin_img, pinROI_box, Pinmask, burImg, burROI_box, Burmask, pin1
+            # return Pin_img, pinROI_box, Pinmask, burImg, burROI_box, Burmask, pin1
+            return burImg, burROI_box, Burmask, pin1
             
         elif preds.shape[0]<=10:
             print(f"\t\t{(Fore.RED)}{(Style.BRIGHT)}{(emoji.emojize(':warning:'))} {' WARNING'} Nothing Detected, Please Check input image {Style.RESET_ALL}")
@@ -961,7 +1014,7 @@ if __name__ == "__main__":
     # Load an image
     for imagePath in tqdm.tqdm(imgPaths):
         print(imagePath)
-        # imagePath   = "/home/zafar/old_pc/data_sets/robot-project-datasets/code-integration/AIRobot/LinA_latest/Front-pin_auto_0/Input-Front-pin_auto_0__Cam-Front__Camera-FNO-33__ProductID-2__.png"
+        # imagePath   = "/home/zafar/old_pc/data_sets/robot-project-datasets/pin_anomaly_data/new_data_factory_bldng/tml_burr_from_ket_20250408-Top-pin-2nd_auto_1.bmp"
         imagePath   = imagePath.strip()
         # try:
         #     surfaceName = imagePath.split(f'/LineB_')[1].split('.png')[0].rsplit('-', 1)[0]
@@ -973,11 +1026,12 @@ if __name__ == "__main__":
         # surfaceName  = '_'.join(imagePath.split('/')[-1].split('.webp')[0].split('_')[1:])
         # surfaceName  = imagePath.split('/')[-1].split('.webp')[0].split('-', 1)[1]
         surfaceName = imagePath.split('/')[-2]
+        # surfaceName = 'Top-pin-2nd_auto_1'
         info={'Input':surfaceName}
         image = cv2.imread(imagePath)
 
         # Run inference
-        Pin_img, pinROI_box, Pinmask, burImg, burROI_box, Burmask, pinPreds = model.process(image, info=info)
+        burImg, burROI_box, Burmask, pinPreds = model.process(image, info=info)
         
         sorted_indices = np.argsort(pinPreds[:, 6])
         pinPreds = pinPreds[sorted_indices]
@@ -1017,12 +1071,15 @@ if __name__ == "__main__":
         # preprocess brr roi image
         _burImg = cv2.cvtColor(burImg, cv2.COLOR_BGR2HSV)
         h, s, v = cv2.split(_burImg)
+        v       = cv2.bilateralFilter(v, 5, 0.05, 5)
+
         if 'Top' in imagePath:
             v_gamma = np.clip(255*(v/255)**0.5, 0, 255)
         elif 'Front' in imagePath:
-            v_gamma = np.clip(255*(v/255)**0.4, 0, 255)        
-        v_gamma_bright = np.clip(v_gamma*1.5, 0, 255).astype(np.uint8)
-        v_gamma_bright[v_gamma_bright<20] = 0
+            v_gamma = np.clip(255*(v/255)**0.5, 0, 255)        
+        v_gamma_bright = np.clip(v_gamma*1.6, 0, 255).astype(np.uint8)
+        v_gamma_bright[v_gamma_bright<10] = 0
+        v_gamma_bright = cv2.bilateralFilter(v_gamma_bright, 7, 0.1, 5)
         _burImg_filterd_th_gamma = cv2.merge([h, s, v_gamma_bright])
         _burImg_filterd_th_gamma = cv2.cvtColor(_burImg_filterd_th_gamma, cv2.COLOR_HSV2BGR)
 
