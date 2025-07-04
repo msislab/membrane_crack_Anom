@@ -3,13 +3,14 @@ import glob
 import shutil
 import cv2
 import tqdm
-files = glob.glob("/home/zafar/old_pc/data_sets/robot-project-datasets/pin_anomaly_data/20250530-A-16/*/*/*/Inputs/*.png", recursive=True)
+files = glob.glob("/home/zafar/old_pc/data_sets/robot-project-datasets/pin_anomaly_data/20250703-D/*/*/*/Inputs/*.png", recursive=True)
 # files = glob.glob("/home/zafar/old_pc/data_sets/robot-project-datasets/pin_anomaly_data/4-6_lineA/*/*/Inputs/*.png", recursive=True)
-surfaces = ["Front-pin_auto_0", "Front-pin_auto_1", "Front-pin-2nd_auto_0", "Front-pin-2nd_auto_1", "Top-pin_auto_0", "Top-pin_auto_1", "Top-pin-2nd_auto_1", "Top-pin-2nd_auto_0"]
+surfaces = ["Front-pin_auto_0", "Front-pin_auto_1", "Front-pin-2nd_auto_0", "Front-pin-2nd_auto_1", "Top-pin_auto_0", "Top-pin_auto_1", "Top-pin-2nd_auto_1", "Top-pin-2nd_auto_0",
+            "Bottom-pin-blur-2_auto_0", "Bottom-pin-blur-2_auto_1"]
 
 
 
-dest_path = "/home/zafar/old_pc/data_sets/robot-project-datasets/pin_anomaly_data/20250530-A-16"
+dest_path = "/home/zafar/old_pc/data_sets/robot-project-datasets/pin_anomaly_data/20250703-D"
 
 convert_to_png = False
 
@@ -84,3 +85,19 @@ for i, file in enumerate(tqdm.tqdm(files)):
             cv2.imwrite(name, img)
         else:
             shutil.copy(file, os.path.join(dest_path, "Top-pin_auto_1", f"{connector_id}_{os.path.basename(file)}"))
+    elif "Bottom-pin-blur-2_auto_0" in file:
+        if convert_to_png:
+            img = cv2.imread(file)
+            connector_id = connector_id.lstrip('0')
+            name = os.path.join(dest_path, "Bottom-pin-blur-2_auto_0", f"{name}-{connector_id}.png")
+            cv2.imwrite(name, img)
+        else:
+            shutil.copy(file, os.path.join(dest_path, "Bottom-pin-blur-2_auto_0", f"{connector_id}_{os.path.basename(file)}"))
+    elif "Bottom-pin-blur-2_auto_1" in file:
+        if convert_to_png:
+            img = cv2.imread(file)
+            connector_id = connector_id.lstrip('0')
+            name = os.path.join(dest_path, "Bottom-pin-blur-2_auto_1", f"{name}-{connector_id}.png")
+            cv2.imwrite(name, img)
+        else:
+            shutil.copy(file, os.path.join(dest_path, "Bottom-pin-blur-2_auto_1", f"{connector_id}_{os.path.basename(file)}"))
