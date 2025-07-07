@@ -39,26 +39,15 @@ class MODEL:
             self.h          = height
             self.w          = width
             self.logger     = logger
-            self.kernel     = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-            self._kernel    = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-            self.kernel1    = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 9))
+            self.kernel     = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
+            self._kernel    = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+            self.model_lock = threading.Lock()
 
-            self.model_lock1 = threading.Lock()
-            self.model_lock2 = threading.Lock()
-            self.model_lock3 = threading.Lock()
-            self.model_lock4 = threading.Lock()
-
-            self.model_1 = YOLO(model_path, task='obb').to(self.device)
-            self.model_2 = YOLO(model_path, task='obb').to(self.device)
-            self.model_3 = YOLO(model_path, task='obb').to(self.device)
-            self.model_4 = YOLO(model_path, task='obb').to(self.device)
+            self.model = YOLO(model_path, task='obb').to(self.device)
     
             dummy_image = np.zeros((640, 640, 3), dtype=np.uint8)
             for _ in range(warmup_runs):
-                _ = self.model_1.predict(source=dummy_image, conf=self.conf_thres, device=self.device, verbose=False)
-                _ = self.model_2.predict(source=dummy_image, conf=self.conf_thres, device=self.device, verbose=False)
-                _ = self.model_3.predict(source=dummy_image, conf=self.conf_thres, device=self.device, verbose=False)
-                _ = self.model_4.predict(source=dummy_image, conf=self.conf_thres, device=self.device, verbose=False)
+                _ = self.model.predict(source=dummy_image, conf=self.conf_thres, device=self.device, verbose=False)
         except Exception as e:
             print(f"Error initializing model: {e}")
             self.logger.exception(f"Error initializing model: {e}")
@@ -221,99 +210,267 @@ class MODEL:
             pin1[:, [2, 4]] += adjustment
 
         return pin1
+    
+    def processFront_patch(self, patch, h, itrs=1):
+        
+        patch[:, :11]  = 0
+        patch[:, -11:] = 0
+
+        patch[0:70, :] = 0
+        try:
+            x_coords = np.where(patch[100, :] > 0)[0]
+            left_x = np.min(x_coords)
+            right_x = np.max(x_coords)
+            patch[3:72, left_x:right_x] = 255
+        except:
+            x_coords = np.where(patch[200, :] > 0)[0]
+            left_x = np.min(x_coords)
+            right_x = np.max(x_coords)
+            patch[3:200, left_x-2:right_x+2] = 255    
+
+        patch[-50:, :] = 0
+        try:
+            x_coords = np.where(patch[-55, :] > 0)[0]
+            left_x   = np.min(x_coords)
+            right_x = np.max(x_coords)
+            patch[-80:h-10, left_x+2:right_x-3] = 255
+        except:
+            x_coords = np.where(patch[-250, :] > 0)[0]
+            left_x   = np.min(x_coords)
+            right_x = np.max(x_coords)    
+            patch[-250:h-50, left_x+2:right_x-3] = 255
+            patch[h-50:h-10, left_x+5:right_x-5] = 255
+        
+        patch = cv2.morphologyEx(patch, cv2.MORPH_CLOSE, self.kernel, iterations=itrs)
+        patch = cv2.morphologyEx(patch, cv2.MORPH_OPEN, self._kernel, iterations=itrs)
+
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(patch, connectivity=4)
+        
+        if num_labels>0:
+            for i in range(1, num_labels):  # Skip background (label 0)
+                if stats[i, cv2.CC_STAT_AREA] < 2000:
+                    patch[labels == i] = 0
+        
+        contours, _ = cv2.findContours(patch, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+
+        # Fill all contours
+        filled = np.zeros_like(patch)
+        for i in range(len(contours)):
+            # Fill all contours regardless of hierarchy
+            cv2.drawContours(filled, contours, i, 255, thickness=cv2.FILLED)
+
+        y = int(0.5 * h)
+        x_coords = np.where(filled[y, :] > 0)[0]
+
+        left_x = np.min(x_coords) + 2
+        right_x = np.max(x_coords) - 2
+        filled[y:h-70, left_x:right_x] = 255
+        return filled
+    
+    def processTop_patch(self, patch, itrs=1):
+        
+        patch[:, :11]  = 0
+        patch[:, -11:] = 0
+        
+        patch = cv2.morphologyEx(patch, cv2.MORPH_CLOSE, self.kernel, iterations=itrs)
+        patch = cv2.morphologyEx(patch, cv2.MORPH_OPEN, self._kernel, iterations=itrs+1)
+
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(patch, connectivity=4)
+        
+        if num_labels>0:
+            for i in range(1, num_labels):  # Skip background (label 0)
+                if stats[i, cv2.CC_STAT_AREA] < 2000:
+                    patch[labels == i] = 0
+        
+        contours, _ = cv2.findContours(patch, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+
+        # Fill all contours
+        filled = np.zeros_like(patch)
+        for i in range(len(contours)):
+            # Fill all contours regardless of hierarchy
+            cv2.drawContours(filled, contours, i, 255, thickness=cv2.FILLED)
+        return filled
 
     def generateMask(self, img, obbBoxes, itrs=1, callfrom=''):
         # s = time.time()
         height, width = img.shape[:2]
         mask = np.zeros((height, width), dtype=bool)
 
-        for box in obbBoxes:                     
-            x1, y1 = max(0, int(box[6]-3)), max(0, int(box[7]))
-            x2, y2 = min(width, int(box[2]+3)), min(height, int(box[3]))
-            
-            patch = img[y1:y2,x1:x2]
-            patch = cv2.threshold(cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY), 30, 255, cv2.THRESH_BINARY)[1]
-            # patch = cv2.morphologyEx(patch, cv2.MORPH_DILATE, self.kernel, iterations=1)
+        for box in obbBoxes:
+            if callfrom=='segment_pin':
+                x1, y1 = max(0, int(box[6])-10), max(0, int(box[7]))
+                x2, y2 = min(width, int(box[2])+10), min(height, int(box[3]))
+                # elif callfrom=='segment_burr':
+                #     x1, y1 = max(0, int(box[6])), max(0, int(box[7]))
+                #     x2, y2 = min(width, int(box[2])), min(height, int(box[3]))
 
-            h, w  = patch.shape
-
-            num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(patch, connectivity=4)
-
-            # post process to remove very small connected components and extending bigger components from top and bottom if necessary
-            if num_labels>0:
-                for i in range(1, num_labels):  # Skip background (label 0)
-                    if stats[i, cv2.CC_STAT_AREA] < 1000:
-                        continue
-                    x, y, _w, _h, area = stats[i]
-                    _x1 = int(x+3)
-                    _x2 = int(x+_w-3)
-                    _y1 = int(y)
-                    # _y2 = int(y+_h)
-                    # if _y1>5:
-                    #     _y1 = 2   
-                    #     # y1 = 5
-                    # if _y2<((h/2)+10):
-                    _y2 = h-3
+                patch = img[y1:y2,x1:x2]
+                #TODO: Expose the patch with brightness preprocessing
+                patch = cv2.threshold(cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY), 35, 255, cv2.THRESH_BINARY)[1]
+                h, w  = patch.shape  
                     
-                    patch[_y1:_y2, _x1:_x2] = 255    
+                if 'Front' in self.surface:
+                    filled = self.processFront_patch(patch, h, itrs=itrs)
+                    patch = cv2.morphologyEx(filled, cv2.MORPH_DILATE, self._kernel, iterations=itrs)
+                    patch = cv2.morphologyEx(patch, cv2.MORPH_ERODE, self._kernel, iterations=itrs+1)
 
-            # post processing for patch Bottom
-            y = int(0.7 * h)
-            x_coords = np.where(patch[-20, :] > 0)[0]
+                    contours, _ = cv2.findContours(patch, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    smoothed_mask = np.zeros_like(patch)
 
-            left_x = np.min(x_coords) if x_coords.size > 0 else _x1 + 2
-            right_x = np.max(x_coords) if x_coords.size > 0 else _x2 -2
-            patch[y:h-3, left_x:right_x] = 255
+                    for cnt in contours:
+                        if cv2.contourArea(cnt) < 1000:
+                            continue
+                        approx = cv2.approxPolyDP(cnt, epsilon=2.5, closed=True)
+                        cv2.drawContours(smoothed_mask, [approx], -1, 255, thickness=cv2.FILLED)
+                    
+                    x_coords = np.where(smoothed_mask[120, :] > 0)[0]
 
-            # patch[y:height-1, left_x:right_x] = 255
-            
-            patch[[0,-1],:] = 0
-            patch[:,[0,-1]] = 0
-            patch = cv2.morphologyEx(patch, cv2.MORPH_DILATE, self._kernel, iterations=itrs+2)
-            contours, _ = cv2.findContours(patch, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            smoothed_mask = np.zeros_like(patch)
+                    left_x = np.min(x_coords) - 5
+                    right_x = np.max(x_coords) + 5
+                    smoothed_mask[130:, right_x:] = 0
+                    smoothed_mask[130:, :left_x]  = 0
 
-            for cnt in contours:
-                if cv2.contourArea(cnt) < 1000:
-                    continue
-                approx = cv2.approxPolyDP(cnt, epsilon=5, closed=True)
-                cv2.drawContours(smoothed_mask, [approx], -1, 255, thickness=cv2.FILLED)
-            if 'Top' in self.surface:
-                # Create a copy of smoothed mask
-                patch = smoothed_mask.copy()
-                h = patch.shape[0]
-                # Apply dilation to top 50 rows
-                patch[:70] = cv2.morphologyEx(smoothed_mask[:70], cv2.MORPH_DILATE, self._kernel, iterations=1)
-                # No erosion for first 50 rows
-                patch[70:h-150] = cv2.morphologyEx(smoothed_mask[70:h-150], cv2.MORPH_ERODE, self._kernel, iterations=itrs)
-                # More erosion for bottom rows
-                patch[h-150:] = cv2.morphologyEx(smoothed_mask[h-150:], cv2.MORPH_ERODE, self._kernel, iterations=itrs+2)
-            elif 'Front' in self.surface:
-                if self.surface in ['Front-pin-2nd_auto_0', 'Front-pin_auto_1', 'Front-pin-2nd_auto_1']:
-                    patch = cv2.morphologyEx(smoothed_mask, cv2.MORPH_ERODE, self._kernel, iterations=itrs)   
-                elif self.surface in ['Front-pin_auto_0']:
-                    patch = cv2.morphologyEx(smoothed_mask, cv2.MORPH_ERODE, self._kernel, iterations=itrs+1)   
+                    smoothed_mask[0:100, right_x+5:] = 0
+                    smoothed_mask[0:100, :left_x-5]  = 0
+                elif 'Top' in self.surface:
+                    # patch = cv2.morphologyEx(filled, cv2.MORPH_DILATE, self._kernel, iterations=itrs
+                    filled = self.processTop_patch(patch, itrs=itrs)
+                    patch = cv2.morphologyEx(filled, cv2.MORPH_ERODE, self._kernel, iterations=itrs+1)
+
+                    contours, _ = cv2.findContours(patch, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    smoothed_mask = np.zeros_like(patch)
+
+                    for cnt in contours:
+                        if cv2.contourArea(cnt) < 1000:
+                            continue
+                        approx = cv2.approxPolyDP(cnt, epsilon=1.2, closed=True)
+                        cv2.drawContours(smoothed_mask, [approx], -1, 255, thickness=cv2.FILLED)
+                    # smoothed_mask = cv2.morphologyEx(smoothed_mask, cv2.MORPH_ERODE, self._kernel, iterations=itrs)
+                    x_coords = np.where(smoothed_mask[h-60, :] > 0)[0]
+
+                    left_x = np.min(x_coords) - 5
+                    right_x = np.max(x_coords) + 3
+                    smoothed_mask[0:h-60, right_x:] = 0
+                    smoothed_mask[0:h-60, :left_x]  = 0
+
+                    patch = cv2.morphologyEx(smoothed_mask, cv2.MORPH_DILATE, self._kernel, iterations=itrs)   
+
+            elif callfrom=='segment_burr':
+                x1, y1 = max(0, int(box[6]-3)), max(0, int(box[7]))
+                x2, y2 = min(width, int(box[2]+3)), min(height, int(box[3]))
+                
+                patch = img[y1:y2,x1:x2]
+                patch = cv2.threshold(cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY), 30, 255, cv2.THRESH_BINARY)[1]
+                # patch = cv2.morphologyEx(patch, cv2.MORPH_DILATE, self.kernel, iterations=1)
+
+                h, w  = patch.shape
+
+                num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(patch, connectivity=4)
+
+                # post process to remove very small connected components and extending bigger components from top and bottom if necessary
+                if num_labels>0:
+                    for i in range(1, num_labels):  # Skip background (label 0)
+                        if stats[i, cv2.CC_STAT_AREA] < 1000:
+                            continue
+                        x, y, _w, _h, area = stats[i]
+                        _x1 = int(x+3)
+                        _x2 = int(x+_w-3)
+                        _y1 = int(y)
+                        # _y2 = int(y+_h)
+                        # if _y1>5:
+                        #     _y1 = 2   
+                        #     # y1 = 5
+                        # if _y2<((h/2)+10):
+                        _y2 = h-3
+                        
+                        patch[_y1:_y2, _x1:_x2] = 255    
+
+                # # post processing for patch top
+                # y = int(0.3 * h)
+                # x_coords = np.where(patch[y, :] > 0)[0]
+
+                # left_x = np.min(x_coords) + 1 if x_coords.size > 0 else 3
+                # right_x = np.max(x_coords) - 1 if x_coords.size > 0 else w - 3    
+
+                # patch[0:y, left_x:right_x] = 255
+
+                # # post processing for patch Bottom
+                y = int(0.7 * h)
+                x_coords = np.where(patch[y, :] > 0)[0]
+
+                left_x = np.min(x_coords) if x_coords.size > 0 else _x1 + 2
+                right_x = np.max(x_coords) if x_coords.size > 0 else _x2 -2
+                patch[y:h-3, left_x:right_x] = 255
+
+                # patch[y:height-1, left_x:right_x] = 255
+                # patch = cv2.morphologyEx(patch, cv2.MORPH_DILATE, self._kernel, iterations=itrs)
+                patch[[0,-1],:] = 0
+                patch[:,[0,-1]] = 0
+                # patch = cv2.morphologyEx(patch, cv2.MORPH_ERODE, self._kernel, iterations=itrs)    
+                # contours, _ = cv2.findContours(patch, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                # if len(contours)>0:
+                #     component_mask = np.zeros_like(patch)
+                #     cv2.drawContours(component_mask, contours, -1, 255, thickness=cv2.FILLED)
+                #     patch[component_mask == 255] = 255    
+                # patch = cv2.morphologyEx(patch, cv2.MORPH_DILATE, self._kernel, iterations=itrs)
+                contours, _ = cv2.findContours(patch, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                smoothed_mask = np.zeros_like(patch)
+
+                for cnt in contours:
+                    if cv2.contourArea(cnt) < 1000:
+                        continue
+                    approx = cv2.approxPolyDP(cnt, epsilon=1.2, closed=True)
+                    cv2.drawContours(smoothed_mask, [approx], -1, 255, thickness=cv2.FILLED)
+                if 'Top' in self.surface:
+                    patch = cv2.morphologyEx(smoothed_mask, cv2.MORPH_ERODE, self._kernel, iterations=itrs+1)
+                elif 'Front' in self.surface:
+                    patch = cv2.morphologyEx(smoothed_mask, cv2.MORPH_ERODE, self._kernel, iterations=itrs+2)
+                    #    
+                # patch = cv2.morphologyEx(smoothed_mask, cv2.MORPH_ERODE, self._kernel, iterations=itrs)
+                # patch = smoothed_mask    
             mask[y1:y2, x1:x2] = patch>0
-            mask[y1-30:y1+5, x1:x2] = True
-            bottom_offset = y2+20 if y2+20<height else height-1
-            mask[y2-5:bottom_offset, x1:x2] = True
+        non_zero_coords = np.argwhere(mask > 0)
+        # rows, cols = binary.shape
+        top_row = np.min(non_zero_coords[:, 0])  # first (top-most) non-zero row
+        bottom_row = np.max(non_zero_coords[:, 0])
+        top_fill = max(0, top_row - 10)
+        bottom_fill = min(height - 1, bottom_row + 10)
+        non_zero_cols = np.unique(non_zero_coords[:, 1])
+
+        for col in non_zero_cols:
+            mask[top_fill:top_row+10, col] = True
+
+        # Step 5: Extend downward to bottom_fill
+        for col in non_zero_cols:
+            mask[bottom_row-5:bottom_fill, col] = True
         # print('Generate mask method time: ', time.time()-s)
         return mask
     
-    def segment(self, img, obbBoxes, roi='Bur'):
-        # s = time.time()
-        roiBox = self.ROIbox(obbBoxes, padding=(60,0))
-        # adjustment for bur ROI
-        roiBox[1] += 10
-        roiBox[3] -= 10
+    def segment(self, img, obbBoxes, roi='Pin'):
 
-        roiImg  = np.zeros_like(img, dtype=np.uint8)
-        x1, y1, x2, y2 = roiBox
-        roiImg[y1:y2, x1:x2] = img[y1:y2, x1:x2]
-        mask = self.generateMask(img, obbBoxes, itrs=1, callfrom='segment_burr')
-        mask = ~mask
-        roiImg = cv2.bitwise_and(roiImg, roiImg, mask=mask.astype(np.uint8))
-        # print('Segment method time (Burr): ', time.time()-s)      
+        if roi=='Pin':
+            # s = time.time()
+            roiBox = self.ROIbox(obbBoxes, padding=(30, 5))
+            roiImg  = np.zeros_like(img, dtype=np.uint8)
+            x1, y1, x2, y2 = roiBox
+            roiImg[y1:y2, x1:x2] = img[y1:y2, x1:x2]
+            mask = self.generateMask(img, obbBoxes, itrs=1, callfrom='segment_pin')
+            roiImg = cv2.bitwise_and(roiImg, roiImg, mask=mask.astype(np.uint8))
+            # print('Segment method time (Pins): ', time.time()-s)
+        elif roi=='Bur':
+            # s = time.time()
+            roiBox = self.ROIbox(obbBoxes, padding=(60,0))
+            # adjustment for bur ROI
+            roiBox[1] += 10
+            roiBox[3] -= 10
+
+            roiImg  = np.zeros_like(img, dtype=np.uint8)
+            x1, y1, x2, y2 = roiBox
+            roiImg[y1:y2, x1:x2] = img[y1:y2, x1:x2]
+            mask = self.generateMask(img, obbBoxes, itrs=1, callfrom='segment_burr')
+            mask = ~mask
+            roiImg = cv2.bitwise_and(roiImg, roiImg, mask=mask.astype(np.uint8))
+            # print('Segment method time (Burr): ', time.time()-s)      
         return roiImg, roiBox    
 
     def ROIbox(self, obbPreds, width=1920, height=1280, padding=(30,10)):
@@ -349,10 +506,41 @@ class MODEL:
         # Filter predictions based on the ROI condition
         preds = predictions[inside_roi]
 
-        return preds    
+        return preds
+    
+    def preProcess_img(self, img, gamma=0.5):
+        b,g,r = cv2.split(img)
+
+        _r = np.array(255*(r / 255) ** gamma, dtype = 'uint8')
+        _g = np.array(255*(g / 255) ** gamma, dtype = 'uint8')
+        _b = np.array(255*(b / 255) ** gamma, dtype = 'uint8')
+
+        return cv2.merge([_b, _g, _r])
+    
+    def pinROI(self, img, pin1):
+        # s = time.time() 
+        # Here only the pin region will be retained in the image
+        # if 'Front' in surface:
+        # fullPin_img, pinBox = self.segment(img, pin1, 'Pin')
+            # pinBox   = [upperPin_box]
+        # elif 'Top' in surface:
+        #     fullPin_img, pinBox = self.segment(img, pin1, 'Pin')
+            # pinBox   = [pinBox]
+        # print(f'Method pinROI process time: {time.time()-s}')
+        return self.segment(img, pin1, 'Pin')    
     
     def burrROI(self, img, pin):
+        # s = time.time()
+        # img = self.preProcess_img(img)
+        # print(f'Method burrROI process time: {time.time()-s}')
         return self.segment(img, pin, 'Bur')
+    
+    # def getName(self, imgPath=''):
+    #     # s = time.time()
+    #     try: realName = imgPath.split('Input-')[-1].split('__Cam')[0]
+    #     except: realName = imgPath
+    #     # print(f'Method getName process time: {time.time()-s}')                            
+    #     return realName
 
     def drawBox(self, img, boxes, obb=False, boxType='xywh', color=(0,255,0), thickness=1, text=''):
         # s = time.time()
@@ -403,44 +591,6 @@ class MODEL:
         # print(f'Method drawBox process time: {time.time()-s}')
         return img    
     
-    def getCrop_offsets(self, pins=[], roiBox=[]):
-        pinPoses = []
-        x1, y1, w, h = int(roiBox[0]), int(roiBox[1]), int(roiBox[2]), int(roiBox[3])
-        roiH = h-y1
-        for pin in pins:
-            x2 = int(((pin[0]+pin[2])/2)-5)
-            y2 = int(y1 + (roiH/2))
-            pinPoses.append([x1, y1, x2,y2])
-            pinPoses.append([x1, y2, x2,h])
-            x1 = x2
-        # pinPoses.append([x1, int(y1/2), w, h])
-        y2 = int(y1 + (roiH/2))
-        pinPoses.append([x1, y1, w, y2])
-        pinPoses.append([x1, y2, w, h])
-        return pinPoses
-
-    def getPatch(self, img, pinPoses):
-        # patch = img[pinPoses[1]:pinPoses[3],pinPoses[0]:pinPoses[2]]
-        return img[pinPoses[1]:pinPoses[3],pinPoses[0]:pinPoses[2]]
-    
-    def patchify(self, img=[], pinPreds=None, roi=[]):
-        patches, patch_positions = [], []
-        if len(pinPreds)>=20:
-            pinPoses = self.getCrop_offsets([pinPreds[3], pinPreds[7], pinPreds[11], pinPreds[15], pinPreds[18]], roi)
-            for pos in pinPoses:
-                patch = self.getPatch(img,pos)
-                patches.append(cv2.resize(patch, (640,640), cv2.INTER_NEAREST))
-                patch_positions.append(pos)
-            # cv2.destroyAllWindows()        
-        elif (len(pinPreds))<=19:            
-            pinPoses = self.getCrop_offsets([pinPreds[2], pinPreds[6], pinPreds[10], pinPreds[14], pinPreds[17]], roi)
-            for pos in pinPoses:
-                patch = self.getPatch(img,pos)
-                patches.append(cv2.resize(patch, (640,640), cv2.INTER_NEAREST))
-                patch_positions.append(pos)           
-        # cv2.destroyAllWindows()
-        return {"patches": patches, "patch_positions": np.array(patch_positions)}
-    
     def getNameAndRoi(self, realName, meanROI):
         x1, y1, x2, y2 = meanROI
 
@@ -456,18 +606,18 @@ class MODEL:
         # }
 
         roi_params = {
-            "Top-pin-2nd_auto_0":  (-830, 15, 60, 920, 1880, 1900, -15, 550, 650, 8, 1282, 1290), # done
-            "Top-pin-2nd_auto_1":  (-830, 15, 100, 860, 1880, 1900, -20, 550, 650, 8, 1282, 1290), # done
-            "Top-pin_auto_0":  (-810, 20, 70, 870, 1820, 1860, -15, 420, 450, 35, 1265, 1280), # done
-            "Top-pin_auto_1":  (-830, 20, 70, 890, 1810, 1870, -40, 430, 460, 45, 1265, 1280),  # done
+            "Top-pin-2nd_auto_0":  (-830, 30, 60, 920, 1890, 1915, -15, 550, 650, 8, 1282, 1290), # done
+            "Top-pin-2nd_auto_1":  (-830, 25, 125, 860, 1890, 1915, -20, 550, 650, 8, 1282, 1290), # done
+            "Top-pin_auto_0":  (-810, 50, 70, 870, 1800, 1880, -15, 420, 450, 35, 1265, 1280), # done
+            "Top-pin_auto_1":  (-830, 30, 70, 890, 1810, 1890, -40, 430, 460, 45, 1265, 1280),  # done
             "Front-pin-2nd_auto_0": (-830, 10, 130, 910, 1900, 1918, -320, -3, 0, 150, 880, 910), # done
             "Front-pin-2nd_auto_1": (-830, 10, 130, 910, 1901, 1919, -320, -1, 3, 150, 880, 910), # done
             "Front-pin_auto_0": (-830, 1, 30, 910, 1880, 1910, -350, 40, 95, 150, 930, 990),   # done
             "Front-pin_auto_1": (-830, 1, 30, 910, 1870, 1900, -330, 40, 95, 150, 930, 990),   # done
             "Front-pin_auto_0_ModifiedExposure": (-830, 1, 30, 910, 1880, 1910, -350, 40, 95, 150, 930, 990),   # done
             "Front-pin_auto_1_ModifiedExposure": (-830, 1, 30, 910, 1870, 1900, -330, 40, 95, 150, 930, 990),   # done
-            "Top-pin_auto_0_ModifiedExposure": (-810, 20, 70, 870, 1820, 1860, -15, 420, 450, 35, 1265, 1280), # done
-            "Top-pin_auto_1_ModifiedExposure": (-830, 20, 70, 890, 1810, 1870, -40, 430, 460, 45, 1265, 1280),  # done
+            "Top-pin_auto_0_ModifiedExposure": (-810, 50, 70, 870, 1800, 1880, -15, 420, 450, 35, 1265, 1280), # done
+            "Top-pin_auto_1_ModifiedExposure": (-830, 30, 70, 890, 1810, 1890, -40, 430, 460, 45, 1265, 1280),  # done
         }
 
         for key, (dx1, min_x1, max_x1, dx2, min_x2, max_x2, dy1, min_y1, max_y1, dy2, min_y2, max_y2) in roi_params.items():
@@ -609,7 +759,7 @@ class MODEL:
         
         return overlaps
     
-    def process(self, image: np.ndarray, info={}): #TODO 7: You will receive image and the detection results from previous model (if this model is not the first one)
+    def process(self, image: np.ndarray, info={}, call_from='', roiExtract=True): #TODO 7: You will receive image and the detection results from previous model (if this model is not the first one)
 
         try:
             # logger.info(f"Surface Name: {info['Input']}")
@@ -625,43 +775,26 @@ class MODEL:
             # start_time = time.time()   
 
             # cloning time
-            st = time.time()
-            img = np.copy(image)
+            # st = time.time()
+            # img = np.copy(image)
             # logger.info(f"[Cloning image] Time taken: {(time.time() - st) * 1000:.4f} milliseconds")
 
             # st = time.time()
             # Convert to CuPy array
             # img_gpu = cp.asarray(img)
-            img = cv2.resize(img, (1920, 1280), interpolation=cv2.INTER_LINEAR)
+            img = cv2.resize(image, (1920, 1280), interpolation=cv2.INTER_LINEAR)
             realName = info['Input']
-            logger.debug(f"[Info Recieved to ROI Model]: {info}")
+            # logger.debug(f"[Info Recieved to ROI Model]: {info}")
             logger.debug(f"[Surface Name]: {realName}")
             self.surface = realName
-            logger.info(f"[clonning] Time taken: {(time.time() - st) * 1000:.4f} milliseconds")
+            # logger.info(f"[clonning] Time taken: {(time.time() - st) * 1000:.4f} milliseconds")
             # print(realName)
 
             try:
-                # Run inference
-                if realName in ['Front-pin-2nd_auto_0', 'Top-pin-2nd_auto_1']:
-                    with self.model_lock1:
-                        st = time.time()
-                        results = self.model_1.predict(img, conf=self.conf_thres, device=self.device, verbose=False)
-                        self.logger.info(f"[ROI Model_1 Inference] Time taken: {(time.time() - st) * 1000:.4f} milliseconds")
-                elif realName in ['Front-pin-2nd_auto_1', 'Top-pin-2nd_auto_0']:
-                    with self.model_lock2:
-                        st = time.time()
-                        results = self.model_2.predict(img, conf=self.conf_thres, device=self.device, verbose=False)
-                        self.logger.info(f"[ROI Model_2 Inference] Time taken: {(time.time() - st) * 1000:.4f} milliseconds")
-                elif realName in ['Front-pin_auto_0', 'Top-pin_auto_1', 'Front-pin_auto_0_ModifiedExposure', 'Top-pin_auto_1_ModifiedExposure']:
-                    with self.model_lock3:
-                        st = time.time()
-                        results = self.model_3.predict(img, conf=self.conf_thres, device=self.device, verbose=False)
-                        self.logger.info(f"[ROI Model_3 Inference] Time taken: {(time.time() - st) * 1000:.4f} milliseconds")
-                elif realName in ['Front-pin_auto_1', 'Top-pin_auto_0', 'Front-pin_auto_1_ModifiedExposure', 'Top-pin_auto_0_ModifiedExposure']:
-                    with self.model_lock4:
-                        st = time.time()
-                        results = self.model_4.predict(img, conf=self.conf_thres, device=self.device, verbose=False)
-                        self.logger.info(f"[ROI Model_4 Inference] Time taken: {(time.time() - st) * 1000:.4f} milliseconds")                        
+                with self.model_lock:
+                    # st = time.time()
+                    results = self.model.predict(img, conf=self.conf_thres, device=self.device, verbose=False)
+                    # self.logger.info(f"[ROI Model_1 Inference] Time taken: {(time.time() - st) * 1000:.4f} milliseconds")                        
                 
                 # st = time.time()
                 preds   = self.processOBB(results, self.conf_thres)
@@ -721,33 +854,56 @@ class MODEL:
                     else:
                         sorted_indices = np.argsort(pin1[:, 6])
                         pin1       = pin1[sorted_indices]
-                        # st = time.time()    
-                        burImg, burROI_box  = self.burrROI(img=img, pin=pin1)
-                        # reduction in roi for burr detection
-                        if 'Front' in realName:
-                            burROI_box[1] += 5
-                            burROI_box[3] -= 50
-                        elif 'Top-pin_auto' in realName:
-                            burROI_box[1] += 5
-                            # burROI_box[3] -= 5
+                        if call_from=='Abrasion_model':
+                            # st = time.time()
+                            if roiExtract:
+                                Pin_img, pinROI_box = self.pinROI(img=img, pin1=pin1)
+                                det_results = {
+                                    'Surface_names': [realName, name],
+                                    # 'original_img' : img,
+                                    'upperPinsObb_preds': pin1,
+                                    'fullPinForeground' : Pin_img,
+                                    'pinROI_box': pinROI_box,
+                                }
+                            else:
+                                pinROI_box = self.ROIbox(pin1, padding=(30, 5))
+                                det_results = {
+                                    'Surface_names': [realName, name],
+                                    'original_img' : img,
+                                    'upperPinsObb_preds': pin1,
+                                    # 'fullPinForeground' : Pin_img,
+                                    'pinROI_box': pinROI_box,
+                                }    
+                            # logger.info(f"[PinROI extraction] Time taken: {(time.time() - st) * 1000:.4f} milliseconds")
 
-                            burROI_box[0] += 15
-                            burROI_box[2] -= 25
-                        elif 'Top-pin-2nd' in realName:
-                            burROI_box[1] += 5
-                            # burROI_box[3] -= 1
+                        elif call_from=='Burr_model':
+                            # st = time.time()    
+                            burImg, burROI_box  = self.burrROI(img=img, pin=pin1)
+                            # reduction in roi for burr detection
+                            if 'Front' in realName:
+                                burROI_box[1] += 5
+                                burROI_box[3] -= 50
+                            elif 'Top-pin_auto' in realName:
+                                burROI_box[1] += 5
+                                burROI_box[3] -= 5
 
-                            burROI_box[0] += 20
-                            burROI_box[2] -= 30        
-                        # print('ROI extraction time: ', time.time()-_s) 
+                                burROI_box[0] += 15
+                                burROI_box[2] -= 25
+                            elif 'Top-pin-2nd' in realName:
+                                burROI_box[1] += 5
+                                # burROI_box[3] -= 1
 
-                        det_results = {
-                            'Surface_names': [realName, name],
-                            'original_img' : img,
-                            'upperPinsObb_preds': pin1,
-                            'burROI_img': burImg,
-                            'burROI_box': burROI_box
-                        }
+                                burROI_box[0] += 20
+                                burROI_box[2] -= 30        
+                            # print('ROI extraction time: ', time.time()-_s) 
+
+                            det_results = {
+                                'Surface_names': [realName, name],
+                                'original_img' : img,
+                                'upperPinsObb_preds': pin1,
+                                'burROI_img': burImg,
+                                'burROI_box': burROI_box
+                            }
                             # logger.info(f"[BurrROI extraction] Time taken: {(time.time() - st) * 1000:.4f} milliseconds")
                     
                     # logger.info(f"[Post process] Time taken: {(time.time() - st) * 1000:.4f} milliseconds")
@@ -787,102 +943,33 @@ class MODEL:
             # print(f"Error in pinROI model: {e}")
             self.logger.exception(f"Error in pinROI model: {e}")
             return []
+
 if __name__ == "__main__":
-    # data prep for Line A and B
     import tqdm
-    import argparse
+    import datetime
     import os
-
-    def arguments():
-        parser = argparse.ArgumentParser(description='Demo')
-        parser.add_argument('--dataPath', type=str, default='',
-                            help='Provide the path of data.txt file')
-        parser.add_argument('--roiModel', type=str, default=None,
-                            help='Provide model.pt path')
-        parser.add_argument('--roiConf', type=float, default=0.5,
-                            help='Choose a confidence threshold between 0 and 1')
-        parser.add_argument('--device', type=int, default=0,
-                            help='Choose a gpu device')
-        parser.add_argument('--savePath', type=str, default='',
-                            help='Provide a path to save the resultant image')
-        args = parser.parse_args()
-        return args
-    
-    args = arguments()
     # Load the model
-    model = MODEL(model_path=args.roiModel, confidence_threshold=0.2, warmup_runs=3)
+    logger.add(f"src/ai_vision/logs/m07_PinROI{datetime.datetime.now()}.log", rotation="10 MB", level="INFO")
+    model = MODEL(model_path='m07_pinROI.engine', confidence_threshold=0.2, warmup_runs=3)
 
-    dataPath = args.dataPath
-    savePath = args.savePath
-
+    dataPath = '04-06-LineA/burr_front.txt'
     with open(dataPath, 'r') as f:
         imgPaths = f.readlines()
-    
-    idx = 0
     # Load an image
     for imagePath in tqdm.tqdm(imgPaths):
-        print(imagePath)
-        # imagePath   = "/home/zafar/old_pc/data_sets/robot-project-datasets/pin_anomaly_data/new_data_factory_bldng/tml_burr_from_ket_20250408-Top-pin-2nd_auto_1.bmp"
-        imagePath   = imagePath.strip()
-        surfaceName = imagePath.split('/')[-2]
-        # surfaceName = 'Top-pin-2nd_auto_1'
+        imagePath    = imagePath.strip()
+        originalName = imagePath.split('/')[-1]
+        # surfaceName  = imagePath.split('Input-')[1].split('__Cam')[0]
+        surfaceName  = imagePath.split('/')[-2]
         info={'Input':surfaceName}
         image = cv2.imread(imagePath)
 
         # Run inference
-        rslts = model.process(image, info=info)
+        st = time.time()
+        _, pinPred, img = model.process(image, info=info, call_from='Burr_model')
+        logger.info(f"[Total processing] Time taken: {(time.time() - st) * 1000:.4f} milliseconds")
 
-        pinPreds    = rslts['upperPinsObb_preds']
-        burImg      = rslts['burROI_img']
-        burROI_box  = rslts['burROI_box']
-        # Burmask     = rslts['burROI_mask']
-        
-        sorted_indices = np.argsort(pinPreds[:, 6])
-        pinPreds = pinPreds[sorted_indices]
-        # print(len(pinPreds))
+        img = model.drawBox(img, pinPred, obb=True, thickness=2, color=(0,0,255), boxType='xywh')
 
-        # adjust roi to igonre black coated region
-        # if 'Front' in imagePath:
-        #     burROI_box[1] += 10
-        #     burROI_box[3] -= 150
-        # elif 'Top' in imagePath:
-        #     burROI_box[1] += 5
-        #     burROI_box[3] -= 10
-
-        # Burmask = (Burmask*255).astype(np.uint8)    
-
-        # preprocess brr roi image
-        _burImg = cv2.cvtColor(burImg, cv2.COLOR_BGR2HSV)
-        h, s, v = cv2.split(_burImg)
-        # v       = cv2.bilateralFilter(v, 5, 0.05, 5)
-
-        if 'Top' in imagePath:
-            v_gamma = np.clip(255*(v/255)**0.5, 0, 255)
-        elif 'Front' in imagePath:
-            v_gamma = np.clip(255*(v/255)**0.5, 0, 255)        
-        # v_gamma_bright = np.clip(v_gamma*1.6, 0, 255).astype(np.uint8)
-        v_gamma[v_gamma<10] = 0
-        v_gamma_bright = np.clip(v_gamma*1.3, 0, 255).astype(np.uint8)
-        # v_gamma_bright = cv2.bilateralFilter(v_gamma_bright, 7, 0.1, 5)
-        _burImg_filterd_th_gamma = cv2.merge([h, s, v_gamma_bright])
-        _burImg_filterd_th_gamma = cv2.cvtColor(_burImg_filterd_th_gamma, cv2.COLOR_HSV2BGR)
-
-        # cv2.imshow('',_burImg_filterd_th_gamma)
-        # cv2.waitKey()
-        # cv2.destroyAllWindows()
-        
-        # patchify
-        patchedImg = model.patchify(_burImg_filterd_th_gamma, pinPreds=pinPreds, roi=burROI_box)
-        patches, patchPosz, patchmasks = patchedImg.get('patches'), patchedImg.get('patch_positions'), patchedImg.get('patch_masks')
-
-        # write patched images
-        for i, patch in enumerate(patches):
-            # patchMask = patchmasks[i]
-            imgSavePath = os.path.join(savePath, 'images')
-            img_name    = os.path.join(imgSavePath, f'img_{idx}.png')
-            # maskSavePath = os.path.join(savePath, 'masks')
-            # mask_name    = os.path.join(maskSavePath, f'burImg_{idx}.png')
-
-            idx += 1
-
-            cv2.imwrite(img_name, patch)
+        savePath = os.path.join('/AIRobot/04-06-LineA/results_pinDet' , originalName)
+        cv2.imwrite(savePath, img)

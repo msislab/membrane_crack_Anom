@@ -13,6 +13,7 @@ import emoji
 from colorama import Fore, Style 
 from ultralytics import YOLO
 import threading
+from datetime import datetime
 
 # Configure logging
 # logger.add(f"src/ai_vision/logs/m07_PinROI{datetime.datetime.now()}.log", rotation="10 MB", level="INFO")
@@ -41,7 +42,9 @@ class MODEL:
             self.logger     = logger
             self.kernel     = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
             self._kernel    = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-            self.kernel1    = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 9))
+            self.kernel35    = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 5))
+            # Horizontal kernel for removing horizontal protrusions
+            self.horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 13))
 
             self.model_lock1 = threading.Lock()
             self.model_lock2 = threading.Lock()
@@ -228,11 +231,19 @@ class MODEL:
         mask = np.zeros((height, width), dtype=bool)
 
         for box in obbBoxes:                     
-            x1, y1 = max(0, int(box[6]-3)), max(0, int(box[7]))
-            x2, y2 = min(width, int(box[2]+3)), min(height, int(box[3]))
+            x1, y1 = max(0, int(box[6]-1)), max(0, int(box[7]))
+            x2, y2 = min(width, int(box[2]+1)), min(height, int(box[3]))
             
             patch = img[y1:y2,x1:x2]
-            patch = cv2.threshold(cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY), 30, 255, cv2.THRESH_BINARY)[1]
+            patchgray = cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY)
+            # max_intensity = np.max(patchgray).astype(np.float64)
+            # average_intensity = np.mean(patchgray)
+            # thres = np.mean([max_intensity, average_intensity])
+            # thres = thres - 10 if thres > 100 else thres
+            if 'Top' in self.surface:
+                patch = cv2.threshold(patchgray, 70, 255, cv2.THRESH_BINARY)[1]
+            elif 'Front' in self.surface:
+                patch = cv2.threshold(patchgray, 100, 255, cv2.THRESH_BINARY)[1]
             # patch = cv2.morphologyEx(patch, cv2.MORPH_DILATE, self.kernel, iterations=1)
 
             h, w  = patch.shape
@@ -245,66 +256,87 @@ class MODEL:
                     if stats[i, cv2.CC_STAT_AREA] < 1000:
                         continue
                     x, y, _w, _h, area = stats[i]
-                    _x1 = int(x+3)
-                    _x2 = int(x+_w-3)
+                    _x1 = int(x+4)
+                    _x2 = int(x+_w-4)
                     _y1 = int(y)
                     # _y2 = int(y+_h)
                     # if _y1>5:
                     #     _y1 = 2   
                     #     # y1 = 5
                     # if _y2<((h/2)+10):
-                    _y2 = h-3
+                    _y2 = h-5
                     
                     patch[_y1:_y2, _x1:_x2] = 255    
 
             # post processing for patch Bottom
             y = int(0.7 * h)
-            x_coords = np.where(patch[-20, :] > 0)[0]
+            x_coords = np.where(patch[-30, :] > 0)[0]
 
             left_x = np.min(x_coords) if x_coords.size > 0 else _x1 + 2
-            right_x = np.max(x_coords) if x_coords.size > 0 else _x2 -2
-            patch[y:h-3, left_x:right_x] = 255
+            right_x = np.max(x_coords) if x_coords.size > 0 else _x2 - 4
+            patch[y:h-1, left_x-1:right_x+1] = 255
 
             # patch[y:height-1, left_x:right_x] = 255
             
-            patch[[0,-1],:] = 0
-            patch[:,[0,-1]] = 0
-            patch = cv2.morphologyEx(patch, cv2.MORPH_DILATE, self._kernel, iterations=itrs+2)
+            # patch[[0,-3],:] = 0
+            # patch[:,[0,-1]] = 0
+            patch = cv2.morphologyEx(patch, cv2.MORPH_DILATE, self._kernel, iterations=itrs+1)
+            patch = cv2.morphologyEx(patch, cv2.MORPH_CLOSE, self.kernel35, iterations=itrs)
             contours, _ = cv2.findContours(patch, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             smoothed_mask = np.zeros_like(patch)
 
             for cnt in contours:
                 if cv2.contourArea(cnt) < 1000:
                     continue
-                approx = cv2.approxPolyDP(cnt, epsilon=5, closed=True)
+                approx = cv2.approxPolyDP(cnt, epsilon=1.9, closed=True)
                 cv2.drawContours(smoothed_mask, [approx], -1, 255, thickness=cv2.FILLED)
             if 'Top' in self.surface:
                 # Create a copy of smoothed mask
                 patch = smoothed_mask.copy()
                 h = patch.shape[0]
-                # Apply dilation to top 50 rows
-                patch[:70] = cv2.morphologyEx(smoothed_mask[:70], cv2.MORPH_DILATE, self._kernel, iterations=1)
-                # No erosion for first 50 rows
-                patch[70:h-150] = cv2.morphologyEx(smoothed_mask[70:h-150], cv2.MORPH_ERODE, self._kernel, iterations=itrs)
-                # More erosion for bottom rows
+                patch[:80] = cv2.morphologyEx(smoothed_mask[:80], cv2.MORPH_DILATE, self._kernel, iterations=2)
+                patch[80:h-150] = cv2.morphologyEx(smoothed_mask[80:h-150], cv2.MORPH_ERODE, self._kernel, iterations=itrs+1)
                 patch[h-150:] = cv2.morphologyEx(smoothed_mask[h-150:], cv2.MORPH_ERODE, self._kernel, iterations=itrs+2)
             elif 'Front' in self.surface:
                 if self.surface in ['Front-pin-2nd_auto_0', 'Front-pin_auto_1', 'Front-pin-2nd_auto_1']:
-                    patch = cv2.morphologyEx(smoothed_mask, cv2.MORPH_ERODE, self._kernel, iterations=itrs)   
+                    patch = cv2.morphologyEx(smoothed_mask, cv2.MORPH_ERODE, self._kernel, iterations=itrs+2)   
                 elif self.surface in ['Front-pin_auto_0']:
-                    patch = cv2.morphologyEx(smoothed_mask, cv2.MORPH_ERODE, self._kernel, iterations=itrs+1)   
+                    patch = cv2.morphologyEx(smoothed_mask, cv2.MORPH_ERODE, self._kernel, iterations=itrs+2)   
+            
+            patch = cv2.morphologyEx(patch, cv2.MORPH_OPEN, self.horizontal_kernel, iterations=1)
+            
             mask[y1:y2, x1:x2] = patch>0
-            mask[y1-30:y1+5, x1:x2] = True
-            bottom_offset = y2+20 if y2+20<height else height-1
-            mask[y2-5:bottom_offset, x1:x2] = True
+            
+            try:
+                x_coords = np.where(mask[y1+50, x1:x2] == True)[0] + x1
+                left_x = np.min(x_coords)
+                right_x = np.max(x_coords)
+                top = y1 -100 if y1 -100 > 0 else 10
+                mask[top:y1+50, left_x+1:right_x-1] = True
+            except Exception as e:
+                logger.error(f"Error in generateMask: {e}")
+                logger.info("Unable to adjust mask from top")
+
+            try:
+                x_coords = np.where(mask[y2-10, x1:x2] == True)[0] + x1
+                left_x = np.min(x_coords)
+                right_x = np.max(x_coords)
+                bottom_offset = y2+20 if y2+20<height else height
+                mask[y2-10:bottom_offset, left_x-1:right_x+1] = True
+            except Exception as e:
+                logger.error(f"Error in generateMask: {e}")
+                logger.info("Unable to adjust mask from bottom")
         # print('Generate mask method time: ', time.time()-s)
+        
+        cv2.imwrite(f'mask_{datetime.now().strftime("%Y%m%d_%H%M%S")}.jpg', mask.astype(np.uint8)*255)
+
         return mask
     
     def segment(self, img, obbBoxes, roi='Bur'):
         # s = time.time()
         roiBox = self.ROIbox(obbBoxes, padding=(60,0))
         # adjustment for bur ROI
-        roiBox[1] += 10
+        roiBox[1] += 5
         roiBox[3] -= 10
 
         roiImg  = np.zeros_like(img, dtype=np.uint8)
@@ -418,7 +450,7 @@ class MODEL:
         pinPoses.append([x1, y1, w, y2])
         pinPoses.append([x1, y2, w, h])
         return pinPoses
-
+    
     def getPatch(self, img, pinPoses):
         # patch = img[pinPoses[1]:pinPoses[3],pinPoses[0]:pinPoses[2]]
         return img[pinPoses[1]:pinPoses[3],pinPoses[0]:pinPoses[2]]
@@ -456,18 +488,18 @@ class MODEL:
         # }
 
         roi_params = {
-            "Top-pin-2nd_auto_0":  (-830, 15, 60, 920, 1880, 1900, -15, 550, 650, 8, 1282, 1290), # done
-            "Top-pin-2nd_auto_1":  (-830, 15, 100, 860, 1880, 1900, -20, 550, 650, 8, 1282, 1290), # done
-            "Top-pin_auto_0":  (-810, 20, 70, 870, 1820, 1860, -15, 420, 450, 35, 1265, 1280), # done
-            "Top-pin_auto_1":  (-830, 20, 70, 890, 1810, 1870, -40, 430, 460, 45, 1265, 1280),  # done
-            "Front-pin-2nd_auto_0": (-830, 10, 130, 910, 1900, 1918, -320, -3, 0, 150, 880, 910), # done
-            "Front-pin-2nd_auto_1": (-830, 10, 130, 910, 1901, 1919, -320, -1, 3, 150, 880, 910), # done
-            "Front-pin_auto_0": (-830, 1, 30, 910, 1880, 1910, -350, 40, 95, 150, 930, 990),   # done
-            "Front-pin_auto_1": (-830, 1, 30, 910, 1870, 1900, -330, 40, 95, 150, 930, 990),   # done
-            "Front-pin_auto_0_ModifiedExposure": (-830, 1, 30, 910, 1880, 1910, -350, 40, 95, 150, 930, 990),   # done
-            "Front-pin_auto_1_ModifiedExposure": (-830, 1, 30, 910, 1870, 1900, -330, 40, 95, 150, 930, 990),   # done
-            "Top-pin_auto_0_ModifiedExposure": (-810, 20, 70, 870, 1820, 1860, -15, 420, 450, 35, 1265, 1280), # done
-            "Top-pin_auto_1_ModifiedExposure": (-830, 20, 70, 890, 1810, 1870, -40, 430, 460, 45, 1265, 1280),  # done
+            "Top-pin-2nd_auto_0":  (-770, 90, 120, 890, 1800, 1840, -30, 640, 680, 15, 1282, 1290), # done
+            "Top-pin-2nd_auto_1":  (-790, 60, 90, 860, 1750, 1790, -40, 640, 660, 15, 1282, 1290), # done
+            "Top-pin_auto_0":  (-810, 90, 150, 815, 1820, 1860, -30, 380, 405, 50, 1070, 1200), # done
+            "Top-pin_auto_1":  (-780, 120, 160, 880, 1830, 1870, -40, 380, 405, 50, 1070, 1200),  # done
+            "Front-pin-2nd_auto_0": (-850, 70, 100, 870, 1820, 1870, -300, -1, 20, 170, 780, 820), # done
+            "Front-pin-2nd_auto_1": (-770, 10, 70, 930, 1760, 1910, -340, -1, 10, 150, 780, 810), # done
+            "Front-pin_auto_0": (-750, 80, 130, 950, 1850, 1890, -400, 90, 150, 150, 910, 930),   # done
+            "Front-pin_auto_1": (-800, 90, 160, 900, 1870, 1905, -350, 80, 110, 170, 900, 920),   # done
+            "Front-pin_auto_0_ModifiedExposure": (-750, 80, 130, 950, 1850, 1890, -400, 90, 150, 150, 910, 930),   # done
+            "Front-pin_auto_1_ModifiedExposure": (-800, 90, 160, 900, 1870, 1905, -350, 80, 110, 170, 900, 920),   # done
+            "Top-pin_auto_0_ModifiedExposure": (-810, 90, 150, 815, 1820, 1860, -30, 380, 405, 70, 1070, 1200), # done
+            "Top-pin_auto_1_ModifiedExposure": (-780, 120, 160, 880, 1830, 1870, -40, 380, 405, 50, 1070, 1200),  # done
         }
 
         for key, (dx1, min_x1, max_x1, dx2, min_x2, max_x2, dy1, min_y1, max_y1, dy2, min_y2, max_y2) in roi_params.items():
@@ -609,6 +641,32 @@ class MODEL:
         
         return overlaps
     
+    def simulate_encoded_image(self, image_np: np.ndarray, format: str = 'png', quality: int = 80) -> np.ndarray:
+        """
+
+        Args:
+            image_np (np.ndarray): input BGR.
+            format (str): 'png' or  'webp'.
+            quality (int): 
+        Returns:
+            np.ndarray: after encode-decode, still in BGR.
+        """
+        if format == 'png':
+            encode_param = [cv2.IMWRITE_PNG_COMPRESSION, 0]  # compress            
+            ext = '.png'
+        elif format == 'webp':
+            encode_param = [cv2.IMWRITE_WEBP_QUALITY, quality]  # quality webp
+            ext = '.webp'
+        else:
+            raise ValueError("Unsupported format. Use 'png' or 'webp'.")
+
+        success, encoded_image = cv2.imencode(ext, image_np, encode_param)
+        if not success:
+            raise ValueError(f"Encoding to {format} failed.")
+
+        decoded_image = cv2.imdecode(encoded_image, cv2.IMREAD_COLOR)
+        return decoded_image
+    
     def process(self, image: np.ndarray, info={}): #TODO 7: You will receive image and the detection results from previous model (if this model is not the first one)
 
         try:
@@ -625,7 +683,7 @@ class MODEL:
             # start_time = time.time()   
 
             # cloning time
-            st = time.time()
+            # st = time.time()
             img = np.copy(image)
             # logger.info(f"[Cloning image] Time taken: {(time.time() - st) * 1000:.4f} milliseconds")
 
@@ -633,11 +691,12 @@ class MODEL:
             # Convert to CuPy array
             # img_gpu = cp.asarray(img)
             img = cv2.resize(img, (1920, 1280), interpolation=cv2.INTER_LINEAR)
+            img = self.simulate_encoded_image(img, format='png')
             realName = info['Input']
-            logger.debug(f"[Info Recieved to ROI Model]: {info}")
+            # logger.debug(f"[Info Recieved to ROI Model]: {info}")
             logger.debug(f"[Surface Name]: {realName}")
             self.surface = realName
-            logger.info(f"[clonning] Time taken: {(time.time() - st) * 1000:.4f} milliseconds")
+            # logger.info(f"[clonning] Time taken: {(time.time() - st) * 1000:.4f} milliseconds")
             # print(realName)
 
             try:
@@ -708,46 +767,48 @@ class MODEL:
                     # logger.info(f"[Pin recovery] Time taken: {(time.time() - st) * 1000:.4f} milliseconds")        
                     # Check for overlapping predictions
 
-                    num_overlaps = self.check_overlap(pin1)
-                    if pin1.shape[0]>numPins and num_overlaps > 0:
-                        self.logger.warning(f"Found {num_overlaps} overlapping pin predictions")
-                        det_results = []
+                    # num_overlaps = self.check_overlap(pin1)
+                    # if pin1.shape[0]>numPins and num_overlaps > 0:
+                    #     self.logger.warning(f"Found {num_overlaps} overlapping pin predictions")
+                    #     det_results = []
                     # For pin prediction verification
                     # uncomment below lines to verify all the pins are predicted after prediction and post-process steps
                     # _img = copy.deepcopy(img)
                     # _img = self.drawBox(_img, pin1, obb=True)
                     # cv2.imwrite('img.jpg', _img)
                     # _s = time.time()
-                    else:
-                        sorted_indices = np.argsort(pin1[:, 6])
-                        pin1       = pin1[sorted_indices]
-                        # st = time.time()    
-                        burImg, burROI_box  = self.burrROI(img=img, pin=pin1)
-                        # reduction in roi for burr detection
-                        if 'Front' in realName:
-                            burROI_box[1] += 5
-                            burROI_box[3] -= 50
-                        elif 'Top-pin_auto' in realName:
-                            burROI_box[1] += 5
-                            # burROI_box[3] -= 5
+                    # else:
+                    sorted_indices = np.argsort(pin1[:, 6])
+                    pin1       = pin1[sorted_indices]
+                    # st = time.time()    
+                    burImg, burROI_box  = self.burrROI(img=img, pin=pin1)
+                    # reduction in roi for burr detection
+                    if 'Front' in realName:
+                        burROI_box[1] += 2
+                        burROI_box[3] -= 50
+                        burROI_box[0] += 10
+                        burROI_box[2] -= 10
+                    elif 'Top-pin_auto' in realName:
+                        burROI_box[1] += 2
+                        burROI_box[3] -= 20
 
-                            burROI_box[0] += 15
-                            burROI_box[2] -= 25
-                        elif 'Top-pin-2nd' in realName:
-                            burROI_box[1] += 5
-                            # burROI_box[3] -= 1
+                        burROI_box[0] += 15
+                        burROI_box[2] -= 8
+                    elif 'Top-pin-2nd' in realName:
+                        burROI_box[1] += 2
+                        # burROI_box[3] -= 1
 
-                            burROI_box[0] += 20
-                            burROI_box[2] -= 30        
-                        # print('ROI extraction time: ', time.time()-_s) 
+                        burROI_box[0] += 15
+                        burROI_box[2] -= 15        
+                    # print('ROI extraction time: ', time.time()-_s) 
 
-                        det_results = {
-                            'Surface_names': [realName, name],
-                            'original_img' : img,
-                            'upperPinsObb_preds': pin1,
-                            'burROI_img': burImg,
-                            'burROI_box': burROI_box
-                        }
+                    det_results = {
+                        'Surface_names': [realName, name],
+                        'original_img' : img,
+                        'upperPinsObb_preds': pin1,
+                        'burROI_img': burImg,
+                        'burROI_box': burROI_box
+                    }
                             # logger.info(f"[BurrROI extraction] Time taken: {(time.time() - st) * 1000:.4f} milliseconds")
                     
                     # logger.info(f"[Post process] Time taken: {(time.time() - st) * 1000:.4f} milliseconds")
@@ -787,8 +848,9 @@ class MODEL:
             # print(f"Error in pinROI model: {e}")
             self.logger.exception(f"Error in pinROI model: {e}")
             return []
+
 if __name__ == "__main__":
-    # data prep for Line A and B
+    # data prep for Line C and D
     import tqdm
     import argparse
     import os
@@ -822,7 +884,8 @@ if __name__ == "__main__":
     # Load an image
     for imagePath in tqdm.tqdm(imgPaths):
         print(imagePath)
-        # imagePath   = "/home/zafar/old_pc/data_sets/robot-project-datasets/pin_anomaly_data/new_data_factory_bldng/tml_burr_from_ket_20250408-Top-pin-2nd_auto_1.bmp"
+        #TODO: fix roi of /home/zafar/old_pc/data_sets/robot-project-datasets/pin_anomaly_data/20250703-D/top/Top-pin-2nd_auto_1/00034_Top-pin-2nd_auto_1.png
+        # imagePath   = "/home/zafar/old_pc/data_sets/robot-project-datasets/pin_anomaly_data/20250703-D/front/Front-pin-2nd_auto_1/00040_Front-pin-2nd_auto_1.png"
         imagePath   = imagePath.strip()
         surfaceName = imagePath.split('/')[-2]
         # surfaceName = 'Top-pin-2nd_auto_1'
@@ -859,7 +922,7 @@ if __name__ == "__main__":
         if 'Top' in imagePath:
             v_gamma = np.clip(255*(v/255)**0.5, 0, 255)
         elif 'Front' in imagePath:
-            v_gamma = np.clip(255*(v/255)**0.5, 0, 255)        
+            v_gamma = np.clip(255*(v/255)**0.6, 0, 255)        
         # v_gamma_bright = np.clip(v_gamma*1.6, 0, 255).astype(np.uint8)
         v_gamma[v_gamma<10] = 0
         v_gamma_bright = np.clip(v_gamma*1.3, 0, 255).astype(np.uint8)
@@ -885,4 +948,4 @@ if __name__ == "__main__":
 
             idx += 1
 
-            cv2.imwrite(img_name, patch)
+            cv2.imwrite(img_name, patch)        
